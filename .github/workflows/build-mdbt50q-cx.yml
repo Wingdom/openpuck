@@ -1,0 +1,136 @@
+name: Build MDBT50Q-CX
+
+# Builds a signed nrfutil DFU package (S140 6.1.1 + OpenPuck app) for a Raytac MDBT50Q-CX / PCA10059
+# dongle running the stock Nordic Open Bootloader. Trigger manually via the Actions tab, or automatically
+# whenever main advances (e.g., after pulling upstream into this fork).
+#
+# Flash the resulting openpuck-mdbt50q-cx.zip with:
+#   nrfutil nrf5sdk-tools dfu usb-serial -pkg openpuck-mdbt50q-cx.zip \
+#       -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00
+#
+# Signing: an ephemeral ECDSA key is generated per run. The Nordic Open Bootloader on this dongle has
+# NRF_DFU_REQUIRE_SIGNED_APP_UPDATE=0, so a fresh key does NOT break flashing an existing install --
+# signatures aren't verified, only the presence of a well-formed init packet is checked.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mdbt50q-cx
+    paths:
+      - 'OpenPuck/**'
+      - 'tools/patch_bsp_lfs.py'
+      - 'tools/extract_s140.py'
+      - 'Makefile'
+      - 'gen_version.sh'
+      - '.github/workflows/build-mdbt50q-cx.yml'
+
+concurrency:
+  group: build-mdbt50q-cx-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # `write` (up from `read`) so the final step can create a release + upload assets.
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install adafruit-nrfutil
+        # The Adafruit nRF52 build recipe shells out to adafruit-nrfutil to package the arduino-cli-side
+        # DFU .zip; it is not bundled with the core on the runner.
+        run: pip install adafruit-nrfutil
+
+      - name: Install Adafruit nRF52 core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config set board_manager.additional_urls https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
+          arduino-cli core update-index
+          arduino-cli core install adafruit:nrf52
+
+      - name: Install Nordic nrfutil (Rust) + nrf5sdk-tools
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/nrfutil" \
+            https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
+          chmod +x "$HOME/.local/bin/nrfutil"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/nrfutil" install nrf5sdk-tools
+
+      - name: Resolve build version
+        id: build_version
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          BASE_VERSION="$(git tag --list | grep -E "$SEMVER_RE" | sort -V | tail -n1 || true)"
+          [ -n "$BASE_VERSION" ] || BASE_VERSION="0.9.1"
+          SHORT_SHA="$(git rev-parse --short=8 "${HEAD_SHA}")"
+          echo "artifact_version=${BASE_VERSION}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate version header
+        env:
+          OPK_BUILD_VERSION: ${{ steps.build_version.outputs.version }}
+        run: ./gen_version.sh
+
+      - name: Build MDBT50Q-CX DFU package
+        run: |
+          mkdir -p build/mdbt50q-cx build/cache/mdbt50q-cx
+          make build-mdbt50q-cx \
+            BUILD_PATH=build/cache/mdbt50q-cx \
+            OUTPUT_DIR=build/mdbt50q-cx
+
+      - name: Verify DFU package
+        # Sanity check: package parses, has SD + app images, correct hw_version, correct sd_req.
+        run: |
+          nrfutil nrf5sdk-tools pkg display build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
+
+      - name: List build outputs
+        run: find build/mdbt50q-cx -maxdepth 1 -type f -print | sort
+
+      - name: Upload MDBT50Q-CX DFU zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: openpuck-${{ steps.build_version.outputs.artifact_version }}-mdbt50q-cx.zip
+          path: build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload app hex (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: openpuck-${{ steps.build_version.outputs.artifact_version }}-mdbt50q-cx.hex
+          path: build/mdbt50q-cx/OpenPuck.ino.hex
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        # Publishes a release tagged `mdbt50q-cx-<base>-<sha>` (guaranteed unique per build) with the DFU zip
+        # attached. `generate_release_notes: true` invokes GitHub's own release-notes generator, which
+        # summarizes commits between this tag and the previous release -- the same output the "Generate
+        # release notes" button in the web UI produces. Re-runs on the same commit update the existing
+        # release in place instead of erroring.
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mdbt50q-cx-${{ steps.build_version.outputs.artifact_version }}
+          name: OpenPuck MDBT50Q-CX ${{ steps.build_version.outputs.artifact_version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
