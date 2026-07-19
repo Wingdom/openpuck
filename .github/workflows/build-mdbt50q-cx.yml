@@ -105,11 +105,13 @@ jobs:
       - name: List build outputs
         run: find build/mdbt50q-cx -maxdepth 1 -type f -print | sort
 
-      - name: Upload MDBT50Q-CX DFU zip
+      - name: Upload MDBT50Q-CX DFU zips (full + app-only)
         uses: actions/upload-artifact@v4
         with:
-          name: openpuck-${{ steps.build_version.outputs.artifact_version }}-mdbt50q-cx.zip
-          path: build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
+          name: openpuck-${{ steps.build_version.outputs.artifact_version }}-mdbt50q-cx-zips
+          path: |
+            build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
+            build/mdbt50q-cx/openpuck-mdbt50q-cx-app.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -122,15 +124,18 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub release
-        # Publishes a release tagged `mdbt50q-cx-<base>-<sha>` (guaranteed unique per build) with the DFU zip
-        # attached. `generate_release_notes: true` invokes GitHub's own release-notes generator, which
-        # summarizes commits between this tag and the previous release -- the same output the "Generate
-        # release notes" button in the web UI produces. Re-runs on the same commit update the existing
-        # release in place instead of erroring.
+        # Publishes a release tagged `mdbt50q-cx-<base>-<sha>` (guaranteed unique per build) with both DFU
+        # zips attached: the full SD+app package for first-flash / recovery, and an app-only package for
+        # faster subsequent updates (~45% smaller, skips rewriting the SoftDevice).
+        # `generate_release_notes: true` invokes GitHub's own release-notes generator, which summarizes
+        # commits between this tag and the previous release -- the same output the "Generate release notes"
+        # button in the web UI produces. Re-runs on the same commit update the existing release in place.
         uses: softprops/action-gh-release@v2
         with:
           tag_name: mdbt50q-cx-${{ steps.build_version.outputs.artifact_version }}
           name: OpenPuck MDBT50Q-CX ${{ steps.build_version.outputs.artifact_version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
+          files: |
+            build/mdbt50q-cx/openpuck-mdbt50q-cx.zip
+            build/mdbt50q-cx/openpuck-mdbt50q-cx-app.zip

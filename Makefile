@@ -86,6 +86,8 @@ build-mdbt50q-cx:
 	$(MAKE) build BUILD_PATH=$(BUILD_PATH) OUTPUT_DIR=$(OUTPUT_DIR) EXTRA_FLAGS="$(EXTRA_FLAGS) -DOPK_TARGET_NORDIC_DONGLE=1"
 	python3 tools/extract_s140.py $(OUTPUT_DIR)/s140_nrf52_6.1.1_softdevice.hex
 	nrfutil nrf5sdk-tools keys generate $(OUTPUT_DIR)/dfu_key.pem
+	# Full package: SD s140_6.1.1 + app. Use for the FIRST flash on a dongle (which has no SoftDevice),
+	# or as a recovery image. --sd-req 0x00,0xB6 accepts either a fresh dongle or one already updated.
 	nrfutil nrf5sdk-tools pkg generate \
 		--hw-version 52 \
 		--sd-req 0x00,0xB6 \
@@ -95,9 +97,22 @@ build-mdbt50q-cx:
 		--softdevice $(OUTPUT_DIR)/s140_nrf52_6.1.1_softdevice.hex \
 		--key-file $(OUTPUT_DIR)/dfu_key.pem \
 		$(OUTPUT_DIR)/openpuck-mdbt50q-cx.zip
+	# App-only package: skips the SoftDevice re-flash on subsequent updates (~15 s over CDC vs ~30 s for
+	# the full zip). --sd-req 0xB6 means the dongle MUST already have s140_6.1.1; the Nordic bootloader
+	# rejects this package on a fresh dongle -- desirable, forces the user to the full zip for first install.
+	nrfutil nrf5sdk-tools pkg generate \
+		--hw-version 52 \
+		--sd-req 0xB6 \
+		--application $(OUTPUT_DIR)/OpenPuck.ino.hex \
+		--application-version 1 \
+		--key-file $(OUTPUT_DIR)/dfu_key.pem \
+		$(OUTPUT_DIR)/openpuck-mdbt50q-cx-app.zip
 	@echo
-	@echo "MDBT50Q-CX DFU package: $(OUTPUT_DIR)/openpuck-mdbt50q-cx.zip"
-	@echo "Flash: nrfutil nrf5sdk-tools dfu usb-serial -pkg $(OUTPUT_DIR)/openpuck-mdbt50q-cx.zip -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00"
+	@echo "MDBT50Q-CX DFU packages:"
+	@echo "  $(OUTPUT_DIR)/openpuck-mdbt50q-cx.zip       (SD + app, ~330 KB -- first flash / recovery)"
+	@echo "  $(OUTPUT_DIR)/openpuck-mdbt50q-cx-app.zip   (app-only,  ~190 KB -- subsequent updates)"
+	@echo
+	@echo "Flash: nrfutil nrf5sdk-tools dfu usb-serial -pkg <zip> -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00"
 
 ## Compile the ReversePuck controller dongle firmware (28DE:1302) with its WebUSB vendor flags baked in.
 reversepuck:

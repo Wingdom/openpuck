@@ -43,6 +43,17 @@
 #define FWUP_MAX_IMG 0x60000UL
 #endif
 
+// The WebUSB firmware-update path (staged UF2 write over the vendor channel) is DISABLED on
+// OPK_TARGET_NORDIC_DONGLE builds. The Nordic Open Bootloader records the running app's CRC in ITS OWN
+// settings page at 0xFF000 (which we intentionally don't touch); rewriting the app via WebUSB would leave
+// that CRC out of sync with flash and the bootloader would refuse to boot the new image until the next full
+// nrfutil DFU cycle. There is also no UF2 flow on this dongle. All fwup* entry points get error/no-op stubs
+// in the #else branch at the bottom of the file so vendor control requests fail immediately at the device
+// (belt-and-braces: the WebUSB panel is served from GitHub Pages and can't know it's talking to a dongle
+// build, so refusing at the device is the only reliable gate), and so stray magic bytes at FWUP_META can
+// never spoof an armed-update state at boot.
+#ifndef OPK_TARGET_NORDIC_DONGLE
+
 // Capability tag, searched for BY THE PANEL inside any .uf2 it is about to flash: an image without this
 // exact string predates panel updates, so flashing it silently locks future updates back to UF2-DFU
 // drag-and-drop -- the panel warns before letting that happen. Bump the suffix only on a breaking protocol
@@ -482,3 +493,36 @@ void fwupWipeIfArmed(void)
 	for (;;) {
 	} // unreachable (ramWipe resets)
 }
+
+#else // OPK_TARGET_NORDIC_DONGLE: WebUSB firmware-update stubs -- see the comment before #ifndef above.
+
+uint8_t fwupBegin(uint32_t, uint32_t)
+{
+	return FWUP_ERR_STATE;
+}
+uint8_t fwupChunk(uint32_t, const uint8_t *, uint8_t)
+{
+	return FWUP_ERR_STATE;
+}
+uint8_t fwupEnd(void)
+{
+	return FWUP_ERR_STATE;
+}
+void fwupAbort(void)
+{
+}
+uint32_t fwupNextOff(void)
+{
+	return 0;
+}
+void fwupArmFullWipe(void)
+{
+}
+void fwupApplyIfArmed(void)
+{
+}
+void fwupWipeIfArmed(void)
+{
+}
+
+#endif // OPK_TARGET_NORDIC_DONGLE
