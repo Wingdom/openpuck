@@ -1,4 +1,20 @@
 # OpenPuck
+
+> [!IMPORTANT]
+> **This fork adds support for the Makerdiary nRF52840 MDK USB Dongle while
+> retaining the original nRF52840 Pro Micro build.**
+>
+> Makerdiary users should download
+> [`OpenPuck-0.9.31-mdk1-makerdiary-mdk.uf2`](https://github.com/stickman-dev/openpuck/releases/download/0.9.31-mdk1/OpenPuck-0.9.31-mdk1-makerdiary-mdk.uf2).
+> Do not install the standard or factory-reset UF2 on the Makerdiary dongle.
+>
+> Before its first OpenPuck installation, the dongle requires Makerdiary's
+> official S140 6.1.1 + UF2 bootloader image to be installed once over SWD.
+> See the
+> [Makerdiary setup and update guide](./docs/BUILD_AND_DEPLOY.md#makerdiary-nrf52840-mdk-usb-dongle)
+> for the complete procedure. Later updates use the `UF2BOOT` drive and no
+> debugger is required.
+
 Opensource firmware for NRF52840 Pro Micro that copycats the Steam Controller 2 Puck and allows emulation of Xbox, Switch, and PS3/4/5 controllers and also includes an independant lizard mode (which can work on UAC prompts/task manager/etc). The Switch and PS3 modes have been verified to work on real consoles and Switch, PS4/5 modes have gyro (and touchpad where available) hooked in. Back 4 buttons are mappable for all emulated modes.
 
 > [!WARNING]
