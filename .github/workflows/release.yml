@@ -115,6 +115,11 @@ jobs:
       - name: Generate UF2 (standard)
         run: ./gen_uf2.sh build/openpuck/OpenPuck.ino.hex build/openpuck/OpenPuck.ino.uf2
 
+      - name: Compile Makerdiary MDK USB Dongle build
+        env:
+          OPK_BUILD_VERSION: ${{ steps.release_version.outputs.version }}
+        run: make build-makerdiary
+
       - name: Compile ReversePuckFirmware
         run: |
           mkdir -p build/reversepuck build/cache/reversepuck
@@ -153,6 +158,11 @@ jobs:
             cp "$f" "release_assets/OpenPuck-${VERSION}-${flavor}.${ext}"
           done
 
+          cp build/makerdiary/OpenPuck.ino.hex \
+            "release_assets/OpenPuck-${VERSION}-makerdiary-mdk.hex"
+          cp build/makerdiary/OpenPuck-makerdiary-mdk.uf2 \
+            "release_assets/OpenPuck-${VERSION}-makerdiary-mdk.uf2"
+
           find build/reversepuck \
             -maxdepth 1 -type f \
             \( -name '*.uf2' -o -name '*.hex' \) \
@@ -180,6 +190,7 @@ jobs:
 
             - `OpenPuck-*-standard.*` — puck firmware (standard)
             - `OpenPuck-*-factory-reset.*` — puck firmware (factory reset)
+            - `OpenPuck-*-makerdiary-mdk.*` — Makerdiary MDK USB Dongle firmware (manual UF2 updates)
             - `ReversePuckFirmware-*.*` — reverse-puck firmware (controller emulator)
             - `.uf2` files for drag-and-drop flashing (BOOT/UF2 drive)
             - `.hex` files for direct flashing workflows
@@ -214,7 +225,8 @@ jobs:
               'Maintained automatically by `.github/workflows/release.yml`; do not edit by hand.' \
               > "$MIRROR/README.md"
           fi
-          cp release_assets/OpenPuck-"${VERSION}"-*.uf2 "$MIRROR"/
+          cp release_assets/OpenPuck-"${VERSION}"-standard.uf2 "$MIRROR"/
+          cp release_assets/OpenPuck-"${VERSION}"-factory-reset.uf2 "$MIRROR"/
           # manifest.json: name -> {panelUpdate}. panelUpdate = the image embeds the FWUP_TAG capability
           # string (fw_update.cpp), i.e. a puck running it can be updated FROM the panel. The panel badges
           # releases whose images can't ("no panel updates") before the user flashes one.

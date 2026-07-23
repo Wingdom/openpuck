@@ -97,6 +97,11 @@ jobs:
         # a drag-and-drop .uf2 ourselves.
         run: ./gen_uf2.sh build/openpuck/OpenPuck.ino.hex build/openpuck/OpenPuck.ino.uf2
 
+      - name: Compile Makerdiary MDK USB Dongle build
+        env:
+          OPK_BUILD_VERSION: ${{ steps.build_version.outputs.version }}
+        run: make build-makerdiary
+
       - name: Compile ReversePuckFirmware
         run: |
           mkdir -p build/reversepuck build/cache/reversepuck
@@ -107,7 +112,7 @@ jobs:
 
       - name: List build outputs
         run: |
-          find build/openpuck build/reversepuck -maxdepth 1 -type f -print | sort
+          find build/openpuck build/makerdiary build/reversepuck -maxdepth 1 -type f -print | sort
 
       - name: Upload OpenPuck UF2 artifact
         uses: actions/upload-artifact@v4
@@ -124,6 +129,22 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: build/openpuck/OpenPuck.ino.hex
+
+      - name: Upload Makerdiary UF2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenPuck-${{ steps.build_version.outputs.artifact_version }}-makerdiary-mdk.uf2
+          retention-days: 7
+          if-no-files-found: error
+          path: build/makerdiary/OpenPuck-makerdiary-mdk.uf2
+
+      - name: Upload Makerdiary HEX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenPuck-${{ steps.build_version.outputs.artifact_version }}-makerdiary-mdk.hex
+          retention-days: 7
+          if-no-files-found: error
+          path: build/makerdiary/OpenPuck.ino.hex
 
       - name: Upload ReversePuckFirmware UF2 artifact
         uses: actions/upload-artifact@v4

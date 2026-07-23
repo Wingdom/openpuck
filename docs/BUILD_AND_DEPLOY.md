@@ -75,6 +75,106 @@ arduino-cli compile -b adafruit:nrf52:feather52840 --build-property "build.extra
 
 ## 5. Upload the firmware
 
+### Makerdiary nRF52840 MDK USB Dongle
+
+The Makerdiary target is deliberately separate from the normal Pro Micro build:
+
+```bash
+make build-makerdiary
+```
+
+It produces:
+
+```text
+build/makerdiary/OpenPuck.ino.hex
+build/makerdiary/OpenPuck-makerdiary-mdk.uf2
+```
+
+The target uses the Adafruit nRF52 core as its runtime, replaces the Feather
+variant with the repo-local Makerdiary pin and clock configuration, and links
+the application at `0x26000` for S140 6.1.1. The build fails if any application
+data falls outside `0x26000`–`0xF3FFF`, protecting the resident Makerdiary
+bootloader at `0xF4000`.
+
+`build-makerdiary` also generates `OpenPuck/git_version.h`, so a local build
+reports its git hash in the WebUSB panel instead of `unknown`. A tagged release
+reports the release version. A local tree with uncommitted files is correctly
+marked `dirty`.
+
+#### One-time S140 6.1.1 setup
+
+OpenPuck's Adafruit nRF52840 runtime requires Nordic S140 6.1.1 and an
+application origin of `0x26000`. Some Makerdiary dongles ship with an older
+S132-based image, which is not compatible even though the UF2 bootloader itself
+works. Install Makerdiary's official combined S140 6.1.1 and UF2 bootloader HEX
+once over SWD:
+
+1. Download
+   [`uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex`](https://github.com/makerdiary/nrf52840-mdk-usb-dongle/raw/main/firmware/uf2_bootloader/0.7.1/uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex).
+2. Connect a CMSIS-DAP probe to the dongle's debug pads:
+
+   ```text
+   SWDIO -> DIO
+   SWCLK -> CLK
+   GND   -> GND
+   ```
+
+   Power the dongle from USB. A Raspberry Pi Debug Probe works; use its
+   **DEBUG**, not UART, connector.
+3. Install pyOCD in a virtual environment and confirm that it sees the probe:
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install pyocd
+   pyocd list
+   ```
+
+4. Program the official image:
+
+   ```bash
+   pyocd load -t nrf52840 \
+     uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex
+   ```
+
+   This is Makerdiary's documented external-debugger installation path. Do not
+   convert the full bootloader HEX to an application UF2 and copy it to
+   `UF2BOOT`.
+5. Hold the dongle button while plugging it in, then inspect
+   `UF2BOOT/INFO_UF2.TXT`. It should report `SoftDevice: S140 6.1.1`.
+
+Optional but recommended before step 4: use `pyocd commander -t nrf52840` and
+save the original flash and UICR:
+
+```text
+savemem 0x00000000 0x00100000 factory-flash.bin
+savemem 0x10001000 0x00000400 uicr.bin
+```
+
+See Makerdiary's
+[UF2 bootloader guide](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/uf2boot/)
+and [pyOCD/DAPLink guide](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/daplink/)
+for the vendor's full programming instructions.
+
+#### Normal Makerdiary updates
+
+After the one-time S140 setup, the debugger is no longer needed:
+
+1. Run `make build-makerdiary`, or download the release asset whose name ends
+   in `-makerdiary-mdk.uf2`.
+2. Hold the dongle button while plugging it in. Release it when `UF2BOOT`
+   mounts and the RGB LED is green.
+3. Drag `OpenPuck-makerdiary-mdk.uf2` onto `UF2BOOT`.
+4. Wait for the red programming blink to finish, then unplug and reconnect the
+   dongle.
+
+Do not flash the standard/Pro Micro OpenPuck UF2 onto this board.
+
+The WebUSB panel intentionally reports **manual UF2 only** for this target.
+Staged panel updates and Adafruit-specific software DFU commands are disabled;
+the Makerdiary bootloader remains the simple recovery and update path. Normal
+configuration, pairing, status, and factory erase in the panel still work.
+
 The quickest path is `make`. The serial port is a **required argument** (find it with `arduino-cli board list`):
 
 ```bash

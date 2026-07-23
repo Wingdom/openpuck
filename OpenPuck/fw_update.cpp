@@ -6,6 +6,8 @@
 #include <Arduino.h>
 #include <string.h>
 
+#if OPK_WEBUSB_FW_UPDATE
+
 // nRF52840 flash map (Adafruit UF2 bootloader layout): MBR 0x0-0x1000, SoftDevice to 0x26000, app region
 // 0x26000-0xED000, internal LittleFS 0xED000-0xF4000, bootloader 0xF4000+, its settings page at 0xFF000.
 // We manage the TOP of the app region: the meta/commit page at 0xEC000 and the staged image right below it,
@@ -462,3 +464,48 @@ void fwupWipeIfArmed(void)
 	for (;;) {
 	} // unreachable (ramWipe resets)
 }
+
+#else
+
+uint32_t fwupNextOff(void)
+{
+	return 0;
+}
+
+uint8_t fwupBegin(uint32_t size, uint32_t crc32)
+{
+	(void)size;
+	(void)crc32;
+	return FWUP_ERR_UNSUPPORTED;
+}
+
+uint8_t fwupChunk(uint32_t off, const uint8_t *d, uint8_t len)
+{
+	(void)off;
+	(void)d;
+	(void)len;
+	return FWUP_ERR_UNSUPPORTED;
+}
+
+uint8_t fwupEnd(void)
+{
+	return FWUP_ERR_UNSUPPORTED;
+}
+
+void fwupAbort(void)
+{
+}
+
+void fwupApplyIfArmed(void)
+{
+}
+
+void fwupArmFullWipe(void)
+{
+}
+
+void fwupWipeIfArmed(void)
+{
+}
+
+#endif

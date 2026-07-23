@@ -12,7 +12,7 @@ CLANG_FORMAT ?= $(shell command -v clang-format-18 \
 
 # All hand-written C/C++ sources. Generated headers (git_version.h) are
 # gitignored and excluded here so formatting never touches them.
-FORMAT_FILES := $(shell find OpenPuck ReversePuckFirmware puck_sniffer pairtui \
+FORMAT_FILES := $(shell find OpenPuck ReversePuckFirmware puck_sniffer pairtui variants \
 	\( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.ino' \) \
 	-not -name 'git_version.h')
 
@@ -29,6 +29,11 @@ FORMAT_FILES := $(shell find OpenPuck ReversePuckFirmware puck_sniffer pairtui \
 # on the command line, e.g.   make build CFG_TUD_HID=8 CFG_TUD_TASK_QUEUE_SZ=128
 # or add your own defines:     make build EXTRA_FLAGS="-DOPK_LOG=1"
 FQBN ?= adafruit:nrf52:feather52840
+MAKERDIARY_FQBN ?= adafruit:nrf52:feather52840
+MAKERDIARY_VARIANT := $(CURDIR)/variants/makerdiary_nrf52840_mdk_usb_dongle
+MAKERDIARY_BUILD_PATH ?= build/cache/makerdiary
+MAKERDIARY_OUTPUT_DIR ?= build/makerdiary
+MAKERDIARY_UF2 ?= $(MAKERDIARY_OUTPUT_DIR)/OpenPuck-makerdiary-mdk.uf2
 CFG_TUD_HID ?= 6
 # Optional output paths; when set, --clean is implied and build artifacts land in OUTPUT_DIR.
 # Used by CI: make build BUILD_PATH=build/cache/openpuck OUTPUT_DIR=build/openpuck
@@ -50,7 +55,7 @@ _PATH_FLAGS = $(if $(BUILD_PATH),--clean --build-path $(BUILD_PATH) --output-dir
 # (No auto-detect -- uploading to a guessed serial port risks writing to the wrong device. List with
 # `arduino-cli board list`.) FLASH_PORT = whatever goal isn't one of our real targets; the catch-all rule at
 # the bottom swallows it so make doesn't try to build the port path as a target.
-FLASH_PORT := $(filter-out format format-check check build build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
+FLASH_PORT := $(filter-out format format-check check build build-makerdiary build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
 UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 
 # ReversePuck (controller dongle, 28DE:1302) build flags. It has ONE HID interface (core default 2 is fine),
@@ -59,12 +64,32 @@ UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 RP_USB_FLAGS = -DNRF52840_XXAA {build.flags.usb} -DCFG_TUD_TASK_QUEUE_SZ=$(CFG_TUD_TASK_QUEUE_SZ) -DCFG_TUD_VENDOR_TX_BUFSIZE=$(CFG_TUD_VENDOR_TX_BUFSIZE) $(EXTRA_FLAGS)
 RP_UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" ReversePuckFirmware
 
-.PHONY: format format-check check build build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy
+.PHONY: format format-check check build build-makerdiary build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy
 
 ## Compile the firmware with the required USB flags baked in. Override CFG_TUD_HID / CFG_TUD_TASK_QUEUE_SZ /
 ## EXTRA_FLAGS / FQBN as make variables if needed.
 build:
 	arduino-cli compile -b $(FQBN) $(_PATH_FLAGS) --build-property "build.extra_flags=$(USB_EXTRA_FLAGS)" OpenPuck
+
+## Makerdiary nRF52840 MDK USB Dongle application-only build.
+## The installed Adafruit core supplies the runtime and linker; the repo-local
+## variant supplies Makerdiary's authoritative pin and clock configuration.
+## Manual UF2 is the only supported update path; no upload recipe is exposed.
+build-makerdiary:
+	mkdir -p "$(MAKERDIARY_BUILD_PATH)" "$(MAKERDIARY_OUTPUT_DIR)"
+	./gen_version.sh
+	arduino-cli compile -b $(MAKERDIARY_FQBN) --clean \
+		--build-path "$(MAKERDIARY_BUILD_PATH)" \
+		--output-dir "$(MAKERDIARY_OUTPUT_DIR)" \
+		--build-property build.board=NRF52840_MDK_USB_DONGLE \
+		--build-property build.variant=makerdiary_nrf52840_mdk_usb_dongle \
+		--build-property build.variant.path="$(MAKERDIARY_VARIANT)" \
+		--build-property "build.extra_flags=$(USB_EXTRA_FLAGS) -DOPK_MAKERDIARY_MDK=1 -DOPK_WEBUSB_FW_UPDATE=0 -DWAKE_LED_ON=LOW" \
+		OpenPuck
+	./tools/check-hex-range.py \
+		"$(MAKERDIARY_OUTPUT_DIR)/OpenPuck.ino.hex" 0x26000 0xF4000
+	./gen_uf2.sh "$(MAKERDIARY_OUTPUT_DIR)/OpenPuck.ino.hex" \
+		"$(MAKERDIARY_UF2)"
 
 ## One-time factory-reset recovery image (wipes persistent storage once on first boot). See §6 of the build doc.
 build-recovery:

@@ -8,7 +8,9 @@
 // Board note: built with the Feather nRF52840 variant, but the usual hardware is a SuperMini "Pro Micro"
 // clone. The Feather's user LED is P1.15 (D3, active high); the SuperMini's blue user LED is P0.15 (= D24 in
 // the Feather pin map -- SPI MISO, unused here). We drive BOTH pins so the indicator works on either board.
-// Override the pins/polarity below if your board differs.
+// Override the pins/polarity below if your board differs. A board variant may instead define
+// OPK_STATUS_LED_IDLE_PIN, OPK_STATUS_LED_ACTIVITY_PIN, and OPK_STATUS_LED_ON to show a steady idle colour
+// that is replaced briefly by a different activity colour.
 #pragma once
 
 #ifndef WAKE_LED_PIN_A

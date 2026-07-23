@@ -25,6 +25,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifndef OPK_WEBUSB_FW_UPDATE
+#define OPK_WEBUSB_FW_UPDATE 1
+#endif
+
 // ACK status codes, echoed to the panel in the 0xAB frame ([0xAB][5][status][nextOff u32 LE]).
 enum {
 	FWUP_OK = 0,
@@ -37,6 +41,7 @@ enum {
 	FWUP_ERR_CRC = 4, // staged bytes don't match the announced CRC32
 	FWUP_ERR_VECTOR =
 		5, // staged image doesn't start with a plausible Cortex-M vector table
+	FWUP_ERR_UNSUPPORTED = 6,
 };
 
 uint8_t fwupBegin(

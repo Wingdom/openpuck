@@ -86,7 +86,7 @@ static void webusbSendBlob()
 	// unknown op; 15 = +staged firmware-update ops 0x20..0x24; 14 = +landAll87 toggle; 13 = +per-slot link
 	// stats; 12 = +relay rate + clock fingerprint; 11 = +reset cause; 10 = +ledBright per type; 9 = +per-type
 	// cfg; 8 = +per-slot link status; 7 = +raw accel; 6 = +swPro120/gyroScale)
-	p[2] = 17;
+	p[2] = OPK_WEBUSB_FW_UPDATE ? 17 : 14;
 	p[3] = g_usbMode;
 	p[4] = (uint8_t)g_mDiv;
 	p[5] = (uint8_t)g_mFric;
@@ -680,6 +680,7 @@ void webusbPoll()
 					NVIC_SystemReset();
 				}
 
+#if OPK_WEBUSB_FW_UPDATE
 				// reboot into serial DFU (adafruit-nrfutil)
 			} else if (op == 0x0B) {
 				usb_web.flush();
@@ -708,6 +709,7 @@ void webusbPoll()
 					faultDiagArmIntentionalReset();
 					NVIC_SystemReset();
 				}
+#endif
 
 				// 0x0D: write ONE bond slot into RAM -- the "clone onto this puck" side of Export/Import.
 				// [0x0D][slot][used][24 rec]. used=0 (or an empty record) clears the slot. The panel sends
@@ -785,6 +787,7 @@ void webusbPoll()
 				saveLizardMap();
 				webusbSendLizard();
 
+#if OPK_WEBUSB_FW_UPDATE
 				// 0x20..0x24: staged firmware update (see fw_update.h). Each op is acked with an 0xAB
 				// frame from the usbd task; the panel ping-pongs on those acks, so at most one command
 				// is ever in flight (also what bounds the flash-stall per loop() pass to one page erase).
@@ -818,6 +821,7 @@ void webusbPoll()
 			} else if (op == 0x24) {
 				fwupAbort();
 				fwupAckPost(FWUP_OK);
+#endif
 
 			} else if (op == 0x02) {
 				uint8_t f = buf[1], v = buf[2];
