@@ -58,7 +58,14 @@ jobs:
           git push origin "$NEXT"
 
   build-release:
-    if: github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
+    # Suffixed tags such as 0.9.31-mdk2 are built by the published-release
+    # event. Skip their tag-push event so the strict semver check below
+    # doesn't create a misleading failed check or duplicate release build.
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/') &&
+      !contains(github.ref_name, '-'))
     runs-on: ubuntu-latest
     env:
       SEMVER_RE: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
