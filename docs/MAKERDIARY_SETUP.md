@@ -353,8 +353,9 @@ pyocd load -t nrf52840 -M halt -e sector \
   makerdiary-s140-6.1.1-bootloader-0.7.1-openpuck1-swd.hex
 ```
 
-The combined image includes S140, the modified bootloader, and the P0.18 reset
-configuration. Do not convert it to UF2 or copy it to `UF2BOOT`.
+The combined image includes S140 and the modified bootloader. On its first
+boot, the bootloader configures P0.18 as the reset pin and automatically resets
+once. Do not convert the image to UF2 or copy it to `UF2BOOT`.
 
 When programming finishes, disconnect the probe, unplug and reconnect the
 dongle, and double-click its button. `INFO_UF2.TXT` should report:

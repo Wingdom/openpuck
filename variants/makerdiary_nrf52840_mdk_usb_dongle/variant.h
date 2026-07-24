@@ -30,9 +30,8 @@
 #define PIN_BUTTON1 (18)
 #define PIN_DFU PIN_BUTTON1
 
-// V1.1 connects P0.16 to P0.18 for a full self-reset. P0.18 must
-// first be enabled as nRESET in UICR; the Makerdiary setup guide
-// patches those selectors into the one-time combined S140/UF2 image.
+// V1.1 connects P0.16 to P0.18 for a full self-reset. The modified
+// Makerdiary bootloader enables P0.18 as nRESET on its first boot.
 #define OPK_SELF_RESET_PIN (16)
 
 #define PIN_SERIAL1_RX (19)

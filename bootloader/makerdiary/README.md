@@ -63,17 +63,18 @@ adafruit-nrfutil dfu genpkg \
   makerdiary-s132-to-s140-6.1.1-bootloader-0.7.1-openpuck1.zip
 ```
 
-The standard build also emits the combined S140 image. Run
-`tools/enable-makerdiary-reset.py` from the OpenPuck repository on that image
-before distributing it for SWD installation. This keeps SWD-installed boards
-ready on their first boot while remaining compatible with the bootloader's
-already-configured path.
+The standard build also emits a combined S140 + bootloader image for SWD
+installation:
 
-```bash
-python tools/enable-makerdiary-reset.py \
-  mdk_nrf52840_dongle_bootloader-0.7.1-openpuck1_s140_6.1.1.hex \
-  makerdiary-s140-6.1.1-bootloader-0.7.1-openpuck1-swd.hex
+```text
+_build/build-mdk_nrf52840_dongle/
+  mdk_nrf52840_dongle_bootloader-0.7.1-openpuck1_s140_6.1.1.hex
 ```
+
+No post-processing is required. The modified bootloader safely configures
+P0.18 as the reset pin on its own first boot and then resets once. The combined
+image can be renamed to
+`makerdiary-s140-6.1.1-bootloader-0.7.1-openpuck1-swd.hex` for release.
 
 ## Decision test
 
