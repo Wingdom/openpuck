@@ -77,6 +77,10 @@ arduino-cli compile -b adafruit:nrf52:feather52840 --build-property "build.extra
 
 ### Makerdiary nRF52840 MDK USB Dongle
 
+If you only want to install or update OpenPuck, use the
+[step-by-step Makerdiary user guide](./MAKERDIARY_SETUP.md). The instructions
+below include developer build details and recovery information.
+
 The Makerdiary target is deliberately separate from the normal Pro Micro build:
 
 ```bash
@@ -106,12 +110,52 @@ marked `dirty`.
 OpenPuck's Adafruit nRF52840 runtime requires Nordic S140 6.1.1 and an
 application origin of `0x26000`. Some Makerdiary dongles ship with an older
 S132-based image, which is not compatible even though the UF2 bootloader itself
-works. Install Makerdiary's official combined S140 6.1.1 and UF2 bootloader HEX
-once over SWD:
+works.
 
-1. Download
-   [`uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex`](https://github.com/makerdiary/nrf52840-mdk-usb-dongle/raw/main/firmware/uf2_bootloader/0.7.1/uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex).
-2. Connect a CMSIS-DAP probe to the dongle's debug pads:
+Use the release asset whose name begins
+`makerdiary-s132-to-s140-6.1.1-bootloader-`. It contains S140 6.1.1 and the
+OpenPuck Makerdiary bootloader. The package accepts the factory S132 5.1.0
+firmware ID (`0xA5`).
+
+1. Double-click the dongle button to enter its serial DFU bootloader.
+2. Find the bootloader's serial port:
+
+   ```bash
+   arduino-cli board list
+   ```
+
+3. Install the package, replacing the port with the one reported above:
+
+   ```bash
+   adafruit-nrfutil --verbose dfu serial \
+     --package makerdiary-s132-to-s140-6.1.1-bootloader-0.7.1-openpuck1.zip \
+     -p /dev/cu.usbmodem1101 -b 115200
+   ```
+
+   On Linux the port is normally `/dev/ttyACM0`; on Windows it resembles
+   `COM5`.
+4. Allow the dongle to restart. One additional automatic reset is expected on
+   the modified bootloader's first boot.
+5. Double-click the button and inspect `UF2BOOT/INFO_UF2.TXT`. It should
+   report `SoftDevice: S140 6.1.1`.
+
+The nRF52 serial DFU format converts its HEX inputs into a contiguous BIN
+payload, so it cannot carry arbitrary UICR address records. The modified
+bootloader handles that limitation before enabling the SoftDevice: if both
+reset selectors are erased, it writes P0.18 to both selectors and resets once.
+If both are already P0.18, it proceeds without another write or reset. If
+either contains a different value, it leaves both untouched.
+
+Makerdiary V1.1 connects P0.16 to P0.18 so OpenPuck can perform a complete pin
+reset. This is required for prompt mode changes because the nRF52840 watchdog
+survives a software reset.
+
+##### SWD installation and recovery
+
+SWD is not required for the normal one-time upgrade, but it remains the
+recovery method if serial DFU fails or the bootloader no longer starts:
+
+1. Connect a CMSIS-DAP probe to the dongle's debug pads:
 
    ```text
    SWDIO -> DIO
@@ -121,7 +165,7 @@ once over SWD:
 
    Power the dongle from USB. A Raspberry Pi Debug Probe works; use its
    **DEBUG**, not UART, connector.
-3. Install pyOCD and IntelHex in a virtual environment and confirm that pyOCD
+2. Install pyOCD and IntelHex in a virtual environment and confirm that pyOCD
    sees the probe:
 
    ```bash
@@ -131,33 +175,17 @@ once over SWD:
    pyocd list
    ```
 
-4. Enable the board's V1.1 self-reset circuit in a copy of the official
-   combined image:
-
-   ```bash
-   python tools/enable-makerdiary-reset.py \
-     uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex \
-     makerdiary-s140-reset-enabled.hex
-   ```
-
-   Makerdiary V1.1 connects P0.16 to P0.18 so firmware can perform a complete
-   pin reset, but the official image leaves P0.18 configured as a normal GPIO.
-   OpenPuck's hardware watchdog survives a software reset, so a reliable and
-   prompt mode change requires P0.18's hardware-reset function. The tool
-   verifies the official bootloader and MBR parameter addresses before setting
-   both UICR reset selectors to P0.18. It does not modify the downloaded source
-   file.
-5. Program the patched combined image:
+3. Program the combined SWD release asset:
 
    ```bash
    pyocd load -t nrf52840 -M halt -e sector \
-     makerdiary-s140-reset-enabled.hex
+     makerdiary-s140-6.1.1-bootloader-0.7.1-openpuck1-swd.hex
    ```
 
-   This is Makerdiary's documented external-debugger installation path. Do not
-   convert the full bootloader HEX to an application UF2 and copy it to
-   `UF2BOOT`.
-6. Verify the UICR configuration:
+   The combined asset includes S140, the modified bootloader, and P0.18's two
+   reset-selector records. Do not convert it to an application UF2 or copy it
+   to `UF2BOOT`.
+4. Verify the UICR configuration:
 
    ```bash
    pyocd commander -t nrf52840
@@ -178,16 +206,25 @@ once over SWD:
    10001200:  00000012 00000012
    ```
 
-7. Unplug and reconnect the dongle, then double-click its button. Inspect
+5. Unplug and reconnect the dongle, then double-click its button. Inspect
    `UF2BOOT/INFO_UF2.TXT`; it should report `SoftDevice: S140 6.1.1`.
 
-Optional but recommended before step 5: use `pyocd commander -t nrf52840` and
+Optional but recommended before programming: use
+`pyocd commander -t nrf52840` and
 save the original flash and UICR:
 
 ```text
 savemem 0x00000000 0x00100000 factory-flash.bin
 savemem 0x10001000 0x00000400 uicr.bin
 ```
+
+The combined image is produced from the same bootloader-only HEX used by the
+serial package. `tools/enable-makerdiary-reset.py` remains in the repository so
+reproducible SWD images begin with reset already configured; its safety checks
+preserve the bootloader and MBR parameter addresses.
+
+The pinned bootloader source, patch, build procedure, and decision test are in
+[`bootloader/makerdiary`](../bootloader/makerdiary/).
 
 See Makerdiary's
 [UF2 bootloader guide](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/programming/uf2boot/)
@@ -212,6 +249,8 @@ The WebUSB panel intentionally reports **manual UF2 only** for this target.
 Staged panel updates and Adafruit-specific software DFU commands are disabled;
 the Makerdiary bootloader remains the simple recovery and update path. Normal
 configuration, pairing, status, and factory erase in the panel still work.
+
+### Pro Micro and other standard nRF52840 boards
 
 The quickest path is `make`. The serial port is a **required argument** (find it with `arduino-cli board list`):
 

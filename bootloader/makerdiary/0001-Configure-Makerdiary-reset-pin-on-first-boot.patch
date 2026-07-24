@@ -1,0 +1,198 @@
+From 593b944b130a007ca819e79e3ebfe6455d08bd1a Mon Sep 17 00:00:00 2001
+From: stickman-dev <50963269+stickman-dev@users.noreply.github.com>
+Date: Fri, 24 Jul 2026 13:18:16 +0100
+Subject: [PATCH] Configure Makerdiary reset pin on first boot
+
+---
+ Makefile                                      |  9 +++--
+ src/boards/mdk_nrf52840_dongle/board.h        | 10 ++---
+ src/boards/mdk_nrf52840_dongle/board.mk       |  4 ++
+ src/boards/mdk_nrf52840_dongle/pinconfig.c    | 39 +++++++++++++++++++
+ src/boards/mdk_nrf52840_dongle/reset_config.h | 34 ++++++++++++++++
+ tests/test_makerdiary_reset_config.c          | 25 ++++++++++++
+ 6 files changed, 113 insertions(+), 8 deletions(-)
+ create mode 100644 src/boards/mdk_nrf52840_dongle/reset_config.h
+ create mode 100644 tests/test_makerdiary_reset_config.c
+
+diff --git a/Makefile b/Makefile
+index 323a702..8898a9d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -303,9 +303,12 @@ ifeq (,$(findstring unrecognized,$(shell $(CC) $(CFLAGS) -fno-ipa-modref 2>&1)))
+ CFLAGS += -fno-ipa-modref
+ endif
+ 
+-# Defined Symbol (MACROS)
+-CFLAGS += -D__HEAP_SIZE=0
+-CFLAGS += -DCONFIG_GPIO_AS_PINRESET
++# Defined Symbol (MACROS)
++CFLAGS += -D__HEAP_SIZE=0
++
++ifneq ($(CONFIG_GPIO_AS_PINRESET),no)
++  CFLAGS += -DCONFIG_GPIO_AS_PINRESET
++endif
+ 
+ # Skip defining CONFIG_NFCT_PINS_AS_GPIOS if the device uses the NFCT.
+ ifneq ($(USE_NFCT),yes)
+diff --git a/src/boards/mdk_nrf52840_dongle/board.h b/src/boards/mdk_nrf52840_dongle/board.h
+index 6528451..0b39e6a 100644
+--- a/src/boards/mdk_nrf52840_dongle/board.h
++++ b/src/boards/mdk_nrf52840_dongle/board.h
+@@ -52,8 +52,8 @@
+ //--------------------------------------------------------------------+
+ // BLE OTA
+ //--------------------------------------------------------------------+
+-#define BLEDIS_MANUFACTURER   "MakerDiary"
+-#define BLEDIS_MODEL          "nRF52840 Micro Dev Kit USB Dongle"
++#define BLEDIS_MANUFACTURER   "Makerdiary"
++#define BLEDIS_MODEL          "nRF52840 MDK USB Dongle"
+ 
+ //--------------------------------------------------------------------+
+ // USB
+@@ -64,9 +64,9 @@
+ #define USB_DESC_UF2_PID       0x0029
+ #define USB_DESC_CDC_ONLY_PID  0x0029
+ 
+-#define UF2_PRODUCT_NAME   "MDK nRF52840 USB Dongle"
+-#define UF2_VOLUME_LABEL   "MDK840DONGL"
+-#define UF2_BOARD_ID       "nRF52840-Dongle-v1"
++#define UF2_PRODUCT_NAME   "Makerdiary nRF52840 MDK USB Dongle"
++#define UF2_VOLUME_LABEL   "UF2BOOT"
++#define UF2_BOARD_ID       "nRF52840-MDK-USB-DONGLE"
+ #define UF2_INDEX_URL      "https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/"
+ 
+ #endif /* _MDK_NRF52840_DONGLE_H_ */
+diff --git a/src/boards/mdk_nrf52840_dongle/board.mk b/src/boards/mdk_nrf52840_dongle/board.mk
+index 9d29ac6..fc8c974 100644
+--- a/src/boards/mdk_nrf52840_dongle/board.mk
++++ b/src/boards/mdk_nrf52840_dongle/board.mk
+@@ -1 +1,5 @@
+ MCU_SUB_VARIANT = nrf52840
++USE_NFCT = yes
++
++# P0.18 must only be selected when both UICR reset fields are erased.
++CONFIG_GPIO_AS_PINRESET = no
+diff --git a/src/boards/mdk_nrf52840_dongle/pinconfig.c b/src/boards/mdk_nrf52840_dongle/pinconfig.c
+index a983e4a..677bcaf 100644
+--- a/src/boards/mdk_nrf52840_dongle/pinconfig.c
++++ b/src/boards/mdk_nrf52840_dongle/pinconfig.c
+@@ -1,6 +1,45 @@
+ #include "boards.h"
++#include "reset_config.h"
+ #include "uf2/configkeys.h"
+ 
++static void nvmc_wait_ready(void)
++{
++  while (NRF_NVMC->READY == NVMC_READY_READY_Busy)
++  {
++  }
++}
++
++static void ensure_reset_pin_configured(void)
++{
++  makerdiary_reset_config_action_t const action =
++      makerdiary_reset_config_decide(NRF_UICR->PSELRESET[0],
++                                     NRF_UICR->PSELRESET[1]);
++
++  if (action != MAKERDIARY_RESET_CONFIG_PROGRAM)
++  {
++    return;
++  }
++
++  NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Wen << NVMC_CONFIG_WEN_Pos;
++  nvmc_wait_ready();
++
++  NRF_UICR->PSELRESET[0] = MAKERDIARY_RESET_PIN;
++  nvmc_wait_ready();
++
++  NRF_UICR->PSELRESET[1] = MAKERDIARY_RESET_PIN;
++  nvmc_wait_ready();
++
++  NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos;
++  nvmc_wait_ready();
++
++  NVIC_SystemReset();
++}
++
++void board_init2(void)
++{
++  ensure_reset_pin_configured();
++}
++
+ __attribute__((used, section(".bootloaderConfig")))
+ const uint32_t bootloaderConfig[] =
+ {
+diff --git a/src/boards/mdk_nrf52840_dongle/reset_config.h b/src/boards/mdk_nrf52840_dongle/reset_config.h
+new file mode 100644
+index 0000000..c1e51b0
+--- /dev/null
++++ b/src/boards/mdk_nrf52840_dongle/reset_config.h
+@@ -0,0 +1,34 @@
++#ifndef MAKERDIARY_RESET_CONFIG_H_
++#define MAKERDIARY_RESET_CONFIG_H_
++
++#include <stdint.h>
++
++#define MAKERDIARY_RESET_PIN 18U
++#define MAKERDIARY_UICR_ERASED UINT32_MAX
++
++typedef enum
++{
++  MAKERDIARY_RESET_CONFIG_READY,
++  MAKERDIARY_RESET_CONFIG_PROGRAM,
++  MAKERDIARY_RESET_CONFIG_CONFLICT
++} makerdiary_reset_config_action_t;
++
++static inline makerdiary_reset_config_action_t
++makerdiary_reset_config_decide(uint32_t pselreset0, uint32_t pselreset1)
++{
++  if ((pselreset0 == MAKERDIARY_RESET_PIN) &&
++      (pselreset1 == MAKERDIARY_RESET_PIN))
++  {
++    return MAKERDIARY_RESET_CONFIG_READY;
++  }
++
++  if ((pselreset0 == MAKERDIARY_UICR_ERASED) &&
++      (pselreset1 == MAKERDIARY_UICR_ERASED))
++  {
++    return MAKERDIARY_RESET_CONFIG_PROGRAM;
++  }
++
++  return MAKERDIARY_RESET_CONFIG_CONFLICT;
++}
++
++#endif
+diff --git a/tests/test_makerdiary_reset_config.c b/tests/test_makerdiary_reset_config.c
+new file mode 100644
+index 0000000..3ef2390
+--- /dev/null
++++ b/tests/test_makerdiary_reset_config.c
+@@ -0,0 +1,25 @@
++#include <assert.h>
++
++#include "reset_config.h"
++
++int main(void)
++{
++  assert(makerdiary_reset_config_decide(
++             MAKERDIARY_UICR_ERASED, MAKERDIARY_UICR_ERASED) ==
++         MAKERDIARY_RESET_CONFIG_PROGRAM);
++
++  assert(makerdiary_reset_config_decide(
++             MAKERDIARY_RESET_PIN, MAKERDIARY_RESET_PIN) ==
++         MAKERDIARY_RESET_CONFIG_READY);
++
++  assert(makerdiary_reset_config_decide(5U, 5U) ==
++         MAKERDIARY_RESET_CONFIG_CONFLICT);
++  assert(makerdiary_reset_config_decide(
++             MAKERDIARY_RESET_PIN, MAKERDIARY_UICR_ERASED) ==
++         MAKERDIARY_RESET_CONFIG_CONFLICT);
++  assert(makerdiary_reset_config_decide(
++             MAKERDIARY_UICR_ERASED, MAKERDIARY_RESET_PIN) ==
++         MAKERDIARY_RESET_CONFIG_CONFLICT);
++
++  return 0;
++}
+-- 
+2.50.1 (Apple Git-155)
+
