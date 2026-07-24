@@ -5,7 +5,7 @@
 > retaining the original nRF52840 Pro Micro build.**
 >
 > Makerdiary users should download
-> [`OpenPuck-0.9.31-mdk1-makerdiary-mdk.uf2`](https://github.com/stickman-dev/openpuck/releases/download/0.9.31-mdk1/OpenPuck-0.9.31-mdk1-makerdiary-mdk.uf2).
+> [`OpenPuck-0.9.31-mdk2-makerdiary-mdk.uf2`](https://github.com/stickman-dev/openpuck/releases/download/0.9.31-mdk2/OpenPuck-0.9.31-mdk2-makerdiary-mdk.uf2).
 > Do not install the standard or factory-reset UF2 on the Makerdiary dongle.
 >
 > Before its first OpenPuck installation, the dongle requires Makerdiary's

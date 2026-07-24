@@ -121,29 +121,67 @@ once over SWD:
 
    Power the dongle from USB. A Raspberry Pi Debug Probe works; use its
    **DEBUG**, not UART, connector.
-3. Install pyOCD in a virtual environment and confirm that it sees the probe:
+3. Install pyOCD and IntelHex in a virtual environment and confirm that pyOCD
+   sees the probe:
 
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   python -m pip install pyocd
+   python -m pip install pyocd intelhex
    pyocd list
    ```
 
-4. Program the official image:
+4. Enable the board's V1.1 self-reset circuit in a copy of the official
+   combined image:
 
    ```bash
-   pyocd load -t nrf52840 \
-     uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex
+   python tools/enable-makerdiary-reset.py \
+     uf2_bootloader-nrf52840_mdk_usb_dongle-0.7.1-s140_6.1.1.hex \
+     makerdiary-s140-reset-enabled.hex
+   ```
+
+   Makerdiary V1.1 connects P0.16 to P0.18 so firmware can perform a complete
+   pin reset, but the official image leaves P0.18 configured as a normal GPIO.
+   OpenPuck's hardware watchdog survives a software reset, so a reliable and
+   prompt mode change requires P0.18's hardware-reset function. The tool
+   verifies the official bootloader and MBR parameter addresses before setting
+   both UICR reset selectors to P0.18. It does not modify the downloaded source
+   file.
+5. Program the patched combined image:
+
+   ```bash
+   pyocd load -t nrf52840 -M halt -e sector \
+     makerdiary-s140-reset-enabled.hex
    ```
 
    This is Makerdiary's documented external-debugger installation path. Do not
    convert the full bootloader HEX to an application UF2 and copy it to
    `UF2BOOT`.
-5. Hold the dongle button while plugging it in, then inspect
-   `UF2BOOT/INFO_UF2.TXT`. It should report `SoftDevice: S140 6.1.1`.
+6. Verify the UICR configuration:
 
-Optional but recommended before step 4: use `pyocd commander -t nrf52840` and
+   ```bash
+   pyocd commander -t nrf52840
+   ```
+
+   At the `pyocd>` prompt:
+
+   ```text
+   read32 0x10001014 8
+   read32 0x10001200 8
+   exit
+   ```
+
+   The two reads should report:
+
+   ```text
+   10001014:  000f4000 000fe000
+   10001200:  00000012 00000012
+   ```
+
+7. Unplug and reconnect the dongle, then double-click its button. Inspect
+   `UF2BOOT/INFO_UF2.TXT`; it should report `SoftDevice: S140 6.1.1`.
+
+Optional but recommended before step 5: use `pyocd commander -t nrf52840` and
 save the original flash and UICR:
 
 ```text
@@ -162,8 +200,8 @@ After the one-time S140 setup, the debugger is no longer needed:
 
 1. Run `make build-makerdiary`, or download the release asset whose name ends
    in `-makerdiary-mdk.uf2`.
-2. Hold the dongle button while plugging it in. Release it when `UF2BOOT`
-   mounts and the RGB LED is green.
+2. Double-click the dongle button. `UF2BOOT` mounts and the RGB LED turns
+   green.
 3. Drag `OpenPuck-makerdiary-mdk.uf2` onto `UF2BOOT`.
 4. Wait for the red programming blink to finish, then unplug and reconnect the
    dongle.

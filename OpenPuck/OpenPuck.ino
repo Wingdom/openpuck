@@ -111,11 +111,23 @@ void modeSwitchReboot(uint8_t mode)
 	if (modeValid(mode))
 		saveMode(
 			mode); // 0xFF / invalid => keep the current mode (bond-import reboot)
+	faultDiagArmIntentionalReset();
+#if defined(OPK_SELF_RESET_PIN)
+	if (USBDevice.mounted())
+		NRF_USBD->USBPULLUP = 0;
+	delayMicroseconds(60000);
+	// The nRF52 watchdog survives NVIC_SystemReset(). A physical reset
+	// clears it before the Makerdiary UF2 bootloader runs.
+	digitalWrite(OPK_SELF_RESET_PIN, LOW);
+	pinMode(OPK_SELF_RESET_PIN, OUTPUT);
+	while (true)
+		;
+#else
 	if (USBDevice.mounted())
 		USBDevice.detach();
-	delay(60); // let the host see the disconnect before the pullup returns on reset
-	faultDiagArmIntentionalReset();
+	delay(60);
 	NVIC_SystemReset();
+#endif
 }
 
 void setup()
