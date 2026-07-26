@@ -4,6 +4,14 @@
 > **This fork adds support for the Makerdiary nRF52840 MDK USB Dongle while
 > retaining the original nRF52840 Pro Micro build.**
 >
+> **Please note:** This port is provided as is. I'm unable to provide support or fixes for 
+> functionality or performance issues with OpenPuck itself. My goal here was purely to 
+> port OpenPuck to run on the Makerdiary MDK dongle, and from my testing it behaves the 
+> same as it does on a Pro Micro board (provided you're on the same version). If you 
+> experience functionality or performance issues, please test on a Pro Micro board first 
+> before reporting upstream, as the maintainer is unlikely to help with reports that 
+> aren't reproduced on that hardware.
+>
 > Makerdiary users should follow the
 > [Makerdiary setup and update guide](./docs/MAKERDIARY_SETUP.md) and download
 > the newest release asset whose name ends in `-makerdiary-mdk.uf2`. Do not
