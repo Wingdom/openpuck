@@ -34,6 +34,12 @@ MAKERDIARY_VARIANT := $(CURDIR)/variants/makerdiary_nrf52840_mdk_usb_dongle
 MAKERDIARY_BUILD_PATH ?= build/cache/makerdiary
 MAKERDIARY_OUTPUT_DIR ?= build/makerdiary
 MAKERDIARY_UF2 ?= $(MAKERDIARY_OUTPUT_DIR)/OpenPuck-makerdiary-mdk.uf2
+CONNECTKIT_FQBN ?= adafruit:nrf52:feather52840
+CONNECTKIT_VARIANT := $(CURDIR)/variants/makerdiary_nrf52840_connectkit
+CONNECTKIT_LDSCRIPT := $(CONNECTKIT_VARIANT)/linker/nrf52840_connectkit_s132_v5.ld
+CONNECTKIT_BUILD_PATH ?= build/cache/connectkit
+CONNECTKIT_OUTPUT_DIR ?= build/connectkit
+CONNECTKIT_UF2 ?= $(CONNECTKIT_OUTPUT_DIR)/OpenPuck-makerdiary-connectkit.uf2
 CFG_TUD_HID ?= 6
 # Optional output paths; when set, --clean is implied and build artifacts land in OUTPUT_DIR.
 # Used by CI: make build BUILD_PATH=build/cache/openpuck OUTPUT_DIR=build/openpuck
@@ -55,7 +61,7 @@ _PATH_FLAGS = $(if $(BUILD_PATH),--clean --build-path $(BUILD_PATH) --output-dir
 # (No auto-detect -- uploading to a guessed serial port risks writing to the wrong device. List with
 # `arduino-cli board list`.) FLASH_PORT = whatever goal isn't one of our real targets; the catch-all rule at
 # the bottom swallows it so make doesn't try to build the port path as a target.
-FLASH_PORT := $(filter-out format format-check check build build-makerdiary build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
+FLASH_PORT := $(filter-out format format-check check build build-makerdiary build-makerdiary-connectkit build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
 UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 
 # ReversePuck (controller dongle, 28DE:1302) build flags. It has ONE HID interface (core default 2 is fine),
@@ -64,7 +70,7 @@ UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 RP_USB_FLAGS = -DNRF52840_XXAA {build.flags.usb} -DCFG_TUD_TASK_QUEUE_SZ=$(CFG_TUD_TASK_QUEUE_SZ) -DCFG_TUD_VENDOR_TX_BUFSIZE=$(CFG_TUD_VENDOR_TX_BUFSIZE) $(EXTRA_FLAGS)
 RP_UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" ReversePuckFirmware
 
-.PHONY: format format-check check build build-makerdiary build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy
+.PHONY: format format-check check build build-makerdiary build-makerdiary-connectkit build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy
 
 ## Compile the firmware with the required USB flags baked in. Override CFG_TUD_HID / CFG_TUD_TASK_QUEUE_SZ /
 ## EXTRA_FLAGS / FQBN as make variables if needed.
@@ -90,6 +96,32 @@ build-makerdiary:
 		"$(MAKERDIARY_OUTPUT_DIR)/OpenPuck.ino.hex" 0x26000 0xF4000
 	./gen_uf2.sh "$(MAKERDIARY_OUTPUT_DIR)/OpenPuck.ino.hex" \
 		"$(MAKERDIARY_UF2)"
+
+## Makerdiary nRF52840 Connect Kit application-only build.
+## This unit's factory bootloader (Adafruit_nRF52_Bootloader-derived, see
+## docs/MAKERDIARY_CONNECTKIT_SETUP.md) already has a real S132 5.1.0
+## SoftDevice installed, and its own non-DFU boot path reads that SoftDevice's
+## declared size back to pick its jump target -- 0x23000, not the S140 6.1.1
+## 0x26000 every other board here uses. The repo-local linker script places
+## the app there instead of replacing the bootloader/SoftDevice (no SWD probe
+## available on this unit as a recovery path). Manual UF2 is the only
+## supported update path; no upload recipe is exposed.
+build-makerdiary-connectkit:
+	mkdir -p "$(CONNECTKIT_BUILD_PATH)" "$(CONNECTKIT_OUTPUT_DIR)"
+	./gen_version.sh
+	arduino-cli compile -b $(CONNECTKIT_FQBN) --clean \
+		--build-path "$(CONNECTKIT_BUILD_PATH)" \
+		--output-dir "$(CONNECTKIT_OUTPUT_DIR)" \
+		--build-property build.board=NRF52840_CONNECTKIT \
+		--build-property build.variant=makerdiary_nrf52840_connectkit \
+		--build-property build.variant.path="$(CONNECTKIT_VARIANT)" \
+		--build-property build.ldscript="$(CONNECTKIT_LDSCRIPT)" \
+		--build-property "build.extra_flags=$(USB_EXTRA_FLAGS) -DOPK_MAKERDIARY_CONNECTKIT=1 -DOPK_WEBUSB_FW_UPDATE=0 -DWAKE_LED_ON=LOW" \
+		OpenPuck
+	./tools/check-hex-range.py \
+		"$(CONNECTKIT_OUTPUT_DIR)/OpenPuck.ino.hex" 0x23000 0xED000
+	./gen_uf2.sh "$(CONNECTKIT_OUTPUT_DIR)/OpenPuck.ino.hex" \
+		"$(CONNECTKIT_UF2)"
 
 ## One-time factory-reset recovery image (wipes persistent storage once on first boot). See §6 of the build doc.
 build-recovery:
