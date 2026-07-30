@@ -23,6 +23,25 @@
 > The modified bootloader configures the V1.1 reset circuit on its first boot.
 > Later updates use the `UF2BOOT` drive.
 
+> [!IMPORTANT]
+> **This fork also adds support for the Makerdiary nRF52840 Connect Kit.**
+>
+> Unlike the MDK USB Dongle above, this port does **not** touch the Connect
+> Kit's factory bootloader or its resident S132 5.1.0 SoftDevice — there is no
+> public board definition for it to safely rebuild a bootloader from, and no
+> SWD probe was available to recover a bad one. Instead the firmware is linked
+> to start where that factory SoftDevice already ends (see
+> [docs/MAKERDIARY_CONNECTKIT_SETUP.md](./docs/MAKERDIARY_CONNECTKIT_SETUP.md)
+> for why). Download the newest release asset whose name ends in
+> `-makerdiary-connectkit.uf2` and drag it onto the `UF2BOOT` drive — no
+> one-time provisioning step is needed. Panel-triggered firmware updates are
+> disabled on this build; use the UF2 drive for every update. Confirmed
+> working on real Connect Kit hardware in Steam/puck mode: boots and
+> enumerates as `28de:1304`, steady blue LED, WebUSB configurator connects,
+> pairs with a real Steam Controller 2. The emulated-controller USB modes
+> (Xbox/Switch/PS4/PS5/DS4) and the mode-switch chord that reaches them are
+> not yet verified on this board — see the setup guide's checklist.
+
 Opensource firmware for NRF52840 Pro Micro that copycats the Steam Controller 2 Puck and allows emulation of Xbox, Switch, and PS3/4/5 controllers and also includes an independant lizard mode (which can work on UAC prompts/task manager/etc). The Switch and PS3 modes have been verified to work on real consoles and Switch, PS4/5 modes have gyro (and touchpad where available) hooked in. Back 4 buttons are mappable for all emulated modes.
 
 > [!WARNING]

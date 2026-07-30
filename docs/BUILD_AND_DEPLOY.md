@@ -82,6 +82,14 @@ recovery are documented separately in the
 [Makerdiary setup guide](./MAKERDIARY_SETUP.md). Do not flash a standard or
 Pro Micro OpenPuck UF2 onto that dongle.
 
+### Makerdiary nRF52840 Connect Kit
+
+A different board from the MDK USB Dongle above, with its own factory
+bootloader/SoftDevice and its own build target (`make build-makerdiary-connectkit`,
+producing `OpenPuck-makerdiary-connectkit.uf2`). Documented separately in the
+[Connect Kit setup guide](./MAKERDIARY_CONNECTKIT_SETUP.md). Do not flash the
+MDK, standard, or Pro Micro OpenPuck UF2 onto this board.
+
 ### Pro Micro and other standard nRF52840 boards
 
 The quickest path is `make`. The serial port is a **required argument** (find it with `arduino-cli board list`):
