@@ -102,6 +102,11 @@ jobs:
           OPK_BUILD_VERSION: ${{ steps.build_version.outputs.version }}
         run: make build-makerdiary
 
+      - name: Compile Makerdiary Connect Kit build
+        env:
+          OPK_BUILD_VERSION: ${{ steps.build_version.outputs.version }}
+        run: make build-makerdiary-connectkit
+
       - name: Compile ReversePuckFirmware
         run: |
           mkdir -p build/reversepuck build/cache/reversepuck
@@ -112,7 +117,7 @@ jobs:
 
       - name: List build outputs
         run: |
-          find build/openpuck build/makerdiary build/reversepuck -maxdepth 1 -type f -print | sort
+          find build/openpuck build/makerdiary build/connectkit build/reversepuck -maxdepth 1 -type f -print | sort
 
       - name: Upload OpenPuck UF2 artifact
         uses: actions/upload-artifact@v4
@@ -145,6 +150,22 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: build/makerdiary/OpenPuck.ino.hex
+
+      - name: Upload Makerdiary Connect Kit UF2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenPuck-${{ steps.build_version.outputs.artifact_version }}-makerdiary-connectkit.uf2
+          retention-days: 7
+          if-no-files-found: error
+          path: build/connectkit/OpenPuck-makerdiary-connectkit.uf2
+
+      - name: Upload Makerdiary Connect Kit HEX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenPuck-${{ steps.build_version.outputs.artifact_version }}-makerdiary-connectkit.hex
+          retention-days: 7
+          if-no-files-found: error
+          path: build/connectkit/OpenPuck.ino.hex
 
       - name: Upload ReversePuckFirmware UF2 artifact
         uses: actions/upload-artifact@v4

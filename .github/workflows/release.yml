@@ -127,6 +127,11 @@ jobs:
           OPK_BUILD_VERSION: ${{ steps.release_version.outputs.version }}
         run: make build-makerdiary
 
+      - name: Compile Makerdiary Connect Kit build
+        env:
+          OPK_BUILD_VERSION: ${{ steps.release_version.outputs.version }}
+        run: make build-makerdiary-connectkit
+
       - name: Compile ReversePuckFirmware
         run: |
           mkdir -p build/reversepuck build/cache/reversepuck
@@ -170,6 +175,11 @@ jobs:
           cp build/makerdiary/OpenPuck-makerdiary-mdk.uf2 \
             "release_assets/OpenPuck-${VERSION}-makerdiary-mdk.uf2"
 
+          cp build/connectkit/OpenPuck.ino.hex \
+            "release_assets/OpenPuck-${VERSION}-makerdiary-connectkit.hex"
+          cp build/connectkit/OpenPuck-makerdiary-connectkit.uf2 \
+            "release_assets/OpenPuck-${VERSION}-makerdiary-connectkit.uf2"
+
           find build/reversepuck \
             -maxdepth 1 -type f \
             \( -name '*.uf2' -o -name '*.hex' \) \
@@ -198,6 +208,7 @@ jobs:
             - `OpenPuck-*-standard.*` — puck firmware (standard)
             - `OpenPuck-*-factory-reset.*` — puck firmware (factory reset)
             - `OpenPuck-*-makerdiary-mdk.*` — Makerdiary MDK USB Dongle firmware (manual UF2 updates)
+            - `OpenPuck-*-makerdiary-connectkit.*` — Makerdiary nRF52840 Connect Kit firmware (manual UF2 updates)
             - `ReversePuckFirmware-*.*` — reverse-puck firmware (controller emulator)
             - `.uf2` files for drag-and-drop flashing (BOOT/UF2 drive)
             - `.hex` files for direct flashing workflows

@@ -1,0 +1,115 @@
+name: Build Makerdiary Connect Kit
+
+# Builds the Connect Kit UF2 (app linked at 0x23000, over the factory S132 5.1.0 bootloader -- see
+# docs/MAKERDIARY_CONNECTKIT_SETUP.md) whenever this branch advances. Trigger manually via the Actions tab,
+# or automatically on every push/merge into makerdiary-connectkit.
+#
+# Flash the resulting OpenPuck-makerdiary-connectkit.uf2 by dragging it onto the UF2BOOT drive.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - makerdiary-connectkit
+    paths:
+      - 'OpenPuck/**'
+      - 'variants/makerdiary_nrf52840_connectkit/**'
+      - 'tools/check-hex-range.py'
+      - 'Makefile'
+      - 'gen_version.sh'
+      - 'gen_uf2.sh'
+      - '.github/workflows/build-makerdiary-connectkit.yml'
+
+concurrency:
+  group: build-makerdiary-connectkit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # `write` (up from `read`) so the final step can create a release + upload assets.
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install adafruit-nrfutil
+        # The Adafruit nRF52 build recipe shells out to adafruit-nrfutil to package a DFU .zip alongside the
+        # .hex; it is not bundled with the core on the runner. We don't use that .zip here, but the compile
+        # step fails without the tool present.
+        run: pip install adafruit-nrfutil
+
+      - name: Install Adafruit nRF52 core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config set board_manager.additional_urls https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
+          arduino-cli core update-index
+          arduino-cli core install adafruit:nrf52
+
+      - name: Resolve build version
+        id: build_version
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          BASE_VERSION="$(git tag --list | grep -E "$SEMVER_RE" | sort -V | tail -n1 || true)"
+          [ -n "$BASE_VERSION" ] || BASE_VERSION="0.9.1"
+          SHORT_SHA="$(git rev-parse --short=8 "${HEAD_SHA}")"
+          echo "artifact_version=${BASE_VERSION}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate version header
+        env:
+          OPK_BUILD_VERSION: ${{ steps.build_version.outputs.version }}
+        run: ./gen_version.sh
+
+      - name: Compile Makerdiary Connect Kit build
+        run: make build-makerdiary-connectkit
+
+      - name: List build outputs
+        run: find build/connectkit -maxdepth 1 -type f -print | sort
+
+      - name: Upload Connect Kit UF2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenPuck-${{ steps.build_version.outputs.artifact_version }}-makerdiary-connectkit.uf2
+          path: build/connectkit/OpenPuck-makerdiary-connectkit.uf2
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Connect Kit HEX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenPuck-${{ steps.build_version.outputs.artifact_version }}-makerdiary-connectkit.hex
+          path: build/connectkit/OpenPuck.ino.hex
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        # Publishes a release tagged `makerdiary-connectkit-<base>-<sha>` (guaranteed unique per build) with
+        # the UF2 attached, so a physical board can be updated without digging through Actions artifacts.
+        # `generate_release_notes: true` invokes GitHub's own release-notes generator, summarizing commits
+        # between this tag and the previous release. Re-runs on the same commit update the existing release.
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: makerdiary-connectkit-${{ steps.build_version.outputs.artifact_version }}
+          name: OpenPuck Makerdiary Connect Kit ${{ steps.build_version.outputs.artifact_version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            build/connectkit/OpenPuck-makerdiary-connectkit.uf2
+            build/connectkit/OpenPuck.ino.hex
