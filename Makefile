@@ -50,7 +50,9 @@ _PATH_FLAGS = $(if $(BUILD_PATH),--clean --build-path $(BUILD_PATH) --output-dir
 # (No auto-detect -- uploading to a guessed serial port risks writing to the wrong device. List with
 # `arduino-cli board list`.) FLASH_PORT = whatever goal isn't one of our real targets; the catch-all rule at
 # the bottom swallows it so make doesn't try to build the port path as a target.
-FLASH_PORT := $(filter-out format format-check check build build-recovery build-mdbt50q-cx reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
+FLASH_PORT := $(filter-out format format-check check build build-raytac \
+	package-raytac flash-raytac deploy-raytac provision-raytac-softdevice \
+	build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
 UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 
 # ReversePuck (controller dongle, 28DE:1302) build flags. It has ONE HID interface (core default 2 is fine),
@@ -59,60 +61,67 @@ UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 RP_USB_FLAGS = -DNRF52840_XXAA {build.flags.usb} -DCFG_TUD_TASK_QUEUE_SZ=$(CFG_TUD_TASK_QUEUE_SZ) -DCFG_TUD_VENDOR_TX_BUFSIZE=$(CFG_TUD_VENDOR_TX_BUFSIZE) $(EXTRA_FLAGS)
 RP_UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" ReversePuckFirmware
 
-.PHONY: format format-check check build build-recovery build-mdbt50q-cx reversepuck reversepuck-flash reversepuck-deploy flash deploy
+.PHONY: format format-check check build build-raytac package-raytac \
+	flash-raytac deploy-raytac provision-raytac-softdevice build-recovery \
+	reversepuck reversepuck-flash reversepuck-deploy flash deploy
 
 ## Compile the firmware with the required USB flags baked in. Override CFG_TUD_HID / CFG_TUD_TASK_QUEUE_SZ /
 ## EXTRA_FLAGS / FQBN as make variables if needed.
 build:
 	arduino-cli compile -b $(FQBN) $(_PATH_FLAGS) --build-property "build.extra_flags=$(USB_EXTRA_FLAGS)" OpenPuck
 
+## Build for the Raytac MDBT50Q-CX-40 without replacing its Open DFU bootloader.
+## Like `build`, this does NOT run gen_version.sh -- run it yourself first if you want version provenance
+## baked in. (It must not run here: CI generates git_version.h once with OPK_BUILD_VERSION set, and a
+## regeneration mid-workflow would strip the release version out of every build that follows.)
+build-raytac:
+	mkdir -p build/raytac build/cache/raytac
+	arduino-cli compile --clean -b adafruit:nrf52:mdbt50qrx \
+		--build-path build/cache/raytac \
+		--output-dir build/raytac \
+		--build-property "build.extra_flags=$(USB_EXTRA_FLAGS) -DOPK_BOARD_MDBT50Q_CX_40=1" OpenPuck
+
+## Package an existing Raytac build for its factory Nordic Open DFU bootloader.
+package-raytac:
+	@test -f build/raytac/OpenPuck.ino.hex || { \
+		echo "run 'make build-raytac' first"; exit 1; }
+	$(RM) build/raytac/OpenPuck-mdbt50q-cx-40.zip
+	nrfutil nrf5sdk-tools pkg generate --hw-version 52 --sd-req 0xB6 \
+		--application-version 1 \
+		--application build/raytac/OpenPuck.ino.hex \
+		build/raytac/OpenPuck-mdbt50q-cx-40.zip
+
+## Program the application package with the device in physical Open DFU mode.
+flash-raytac:
+	@test -f build/raytac/OpenPuck-mdbt50q-cx-40.zip || { \
+		echo "run 'make package-raytac' first"; exit 1; }
+	nrfutil device program \
+		--firmware build/raytac/OpenPuck-mdbt50q-cx-40.zip \
+		--traits nordicDfu
+
+## Build, package, and program the application without changing the SoftDevice.
+deploy-raytac:
+	$(MAKE) build-raytac
+	$(MAKE) package-raytac
+	$(MAKE) flash-raytac
+
+## One-time S140 6.1.1 provisioning; re-enter Open DFU before flashing the app.
+provision-raytac-softdevice:
+	@test -f "$(SOFTDEVICE_HEX)" || { \
+		echo "set SOFTDEVICE_HEX to Nordic's S140 6.1.1 HEX"; \
+		exit 1; }
+	mkdir -p build/raytac
+	$(RM) build/raytac/s140-6.1.1.zip
+	nrfutil nrf5sdk-tools pkg generate --hw-version 52 \
+		--sd-req 0xAE,0xB6 --sd-id 0xB6 \
+		--softdevice "$(SOFTDEVICE_HEX)" \
+		build/raytac/s140-6.1.1.zip
+	nrfutil device program --firmware build/raytac/s140-6.1.1.zip \
+		--traits nordicDfu
+
 ## One-time factory-reset recovery image (wipes persistent storage once on first boot). See §6 of the build doc.
 build-recovery:
 	$(MAKE) build BUILD_PATH=$(BUILD_PATH) OUTPUT_DIR=$(OUTPUT_DIR) EXTRA_FLAGS="$(EXTRA_FLAGS) -DOPK_FACTORY_RESET=1"
-
-## Build a signed nrfutil DFU package (SoftDevice s140_6.1.1 + OpenPuck app) for a Raytac MDBT50Q-CX / PCA10059
-## dongle running the stock Nordic Open Bootloader. Requires: nrfutil (Nordic Rust binary) with the
-## `nrf5sdk-tools` module installed. OUTPUT_DIR is mandatory; BUILD_PATH is recommended (else build/cache).
-## An ephemeral ECDSA signing key is generated per run -- the Nordic Open Bootloader on this dongle does NOT
-## verify signatures (NRF_DFU_REQUIRE_SIGNED_APP_UPDATE=0), so a fresh key is fine and doesn't break existing
-## installs. See the OPK_TARGET_NORDIC_DONGLE branches in fw_update.cpp / fault_diag.cpp for the flash-layout
-## adjustments this target relies on, and tools/patch_bsp_lfs.py for the Adafruit-core LittleFS relocation.
-build-mdbt50q-cx: BUILD_PATH ?= build/cache
-build-mdbt50q-cx:
-	@[ -n "$(OUTPUT_DIR)" ] || { echo "usage: make build-mdbt50q-cx OUTPUT_DIR=build/out [BUILD_PATH=build/cache]"; exit 1; }
-	@command -v nrfutil >/dev/null || { echo "nrfutil not found; install from https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/"; exit 1; }
-	@nrfutil list 2>/dev/null | grep -q '^nrf5sdk-tools' || { echo "nrfutil nrf5sdk-tools module missing; run: nrfutil install nrf5sdk-tools"; exit 1; }
-	python3 tools/patch_bsp_lfs.py 0xD9000
-	$(MAKE) build BUILD_PATH=$(BUILD_PATH) OUTPUT_DIR=$(OUTPUT_DIR) EXTRA_FLAGS="$(EXTRA_FLAGS) -DOPK_TARGET_NORDIC_DONGLE=1"
-	python3 tools/extract_s140.py $(OUTPUT_DIR)/s140_nrf52_6.1.1_softdevice.hex
-	nrfutil nrf5sdk-tools keys generate $(OUTPUT_DIR)/dfu_key.pem
-	# Full package: SD s140_6.1.1 + app. Use for the FIRST flash on a dongle (which has no SoftDevice),
-	# or as a recovery image. --sd-req 0x00,0xB6 accepts either a fresh dongle or one already updated.
-	nrfutil nrf5sdk-tools pkg generate \
-		--hw-version 52 \
-		--sd-req 0x00,0xB6 \
-		--sd-id 0xB6 \
-		--application $(OUTPUT_DIR)/OpenPuck.ino.hex \
-		--application-version 1 \
-		--softdevice $(OUTPUT_DIR)/s140_nrf52_6.1.1_softdevice.hex \
-		--key-file $(OUTPUT_DIR)/dfu_key.pem \
-		$(OUTPUT_DIR)/openpuck-mdbt50q-cx.zip
-	# App-only package: skips the SoftDevice re-flash on subsequent updates (~15 s over CDC vs ~30 s for
-	# the full zip). --sd-req 0xB6 means the dongle MUST already have s140_6.1.1; the Nordic bootloader
-	# rejects this package on a fresh dongle -- desirable, forces the user to the full zip for first install.
-	nrfutil nrf5sdk-tools pkg generate \
-		--hw-version 52 \
-		--sd-req 0xB6 \
-		--application $(OUTPUT_DIR)/OpenPuck.ino.hex \
-		--application-version 1 \
-		--key-file $(OUTPUT_DIR)/dfu_key.pem \
-		$(OUTPUT_DIR)/openpuck-mdbt50q-cx-app.zip
-	@echo
-	@echo "MDBT50Q-CX DFU packages:"
-	@echo "  $(OUTPUT_DIR)/openpuck-mdbt50q-cx.zip       (SD + app, ~330 KB -- first flash / recovery)"
-	@echo "  $(OUTPUT_DIR)/openpuck-mdbt50q-cx-app.zip   (app-only,  ~190 KB -- subsequent updates)"
-	@echo
-	@echo "Flash: nrfutil nrf5sdk-tools dfu usb-serial -pkg <zip> -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00"
 
 ## Compile the ReversePuck controller dongle firmware (28DE:1302) with its WebUSB vendor flags baked in.
 reversepuck:
