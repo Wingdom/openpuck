@@ -244,6 +244,17 @@ jobs:
           path.
           NOTES_EOF
 
+      - name: Delete previous release
+        # softprops/action-gh-release only uploads/overwrites files matching the CURRENT run's
+        # filenames -- it never removes assets that existed on a prior run but aren't produced
+        # anymore (e.g. after a rename). Recreating the release from scratch each run is what
+        # guarantees it only ever holds this run's files, and also keeps the release's displayed
+        # target commit current instead of frozen at whichever run first created the tag.
+        # `|| true`: nothing to delete on the very first run.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete "${RELEASE_TAG}" --yes --cleanup-tag --repo "${{ github.repository }}" || true
+
       - name: Create/update combined release
         uses: softprops/action-gh-release@v2
         with:
