@@ -10,20 +10,7 @@
 // 0x26000-0xED000, internal LittleFS 0xED000-0xF4000, bootloader 0xF4000+, its settings page at 0xFF000.
 // We manage the TOP of the app region: the meta/commit page at 0xEC000 and the staged image right below it,
 // growing downward. Nothing outside [APP_BASE, 0xED000) is ever written except FWUP_BL_SETTINGS (see apply).
-//
-// OPK_TARGET_NORDIC_DONGLE alternate map (Raytac MDBT50Q-CX / PCA10059): the resident Nordic Open Bootloader
-// occupies 0xE0000-0xFE000 (settings 0xFF000, MBR params 0xFE000), so every landmark must live strictly below
-// 0xE0000. LittleFS moves down to 0xD9000 (see tools/patch_bsp_lfs.py); meta / staging / "BL settings shim"
-// follow it. FWUP_BL_SETTINGS becomes a scratch page in the app region -- the Nordic bootloader ignores it
-// (its own settings live at 0xFF000), and pointing our writes at 0xD7000 stops us stomping on that live page.
 #define FWUP_APP_BASE 0x26000UL
-#ifdef OPK_TARGET_NORDIC_DONGLE
-#define FWUP_APP_END 0xD9000UL
-#define FWUP_META 0xD8000UL
-#define FWUP_FS_BASE 0xD9000UL
-#define FWUP_FS_END 0xE0000UL
-#define FWUP_BL_SETTINGS 0xD7000UL
-#else
 #define FWUP_APP_END 0xED000UL
 #define FWUP_META 0xEC000UL
 // internal LittleFS (cfg.bin + bonds.bin) sits between the app region and the bootloader; wiped whole by the
@@ -31,28 +18,10 @@
 #define FWUP_FS_BASE 0xED000UL
 #define FWUP_FS_END 0xF4000UL
 #define FWUP_BL_SETTINGS 0xFF000UL
-#endif
 #define FWUP_PAGE 4096UL
-// Image cap. Also what makes the apply copy safe from self-overlap: on the stock layout dst ends at most at
-// 0x26000+0x60000 = 0x86000, while the staged source starts at (0xEC000-size)&~0xFFF >= 0x8C000 -- disjoint
-// by >=24 KiB. Under OPK_TARGET_NORDIC_DONGLE the cap is lowered to keep the same guarantee against the moved
-// FWUP_META at 0xD8000: dst end 0x26000+0x50000 = 0x76000 vs source start (0xD8000-size)&~0xFFF >= 0x88000.
-#ifdef OPK_TARGET_NORDIC_DONGLE
-#define FWUP_MAX_IMG 0x50000UL
-#else
+// Image cap. Also what makes the apply copy safe from self-overlap: dst ends at most at 0x26000+0x60000 =
+// 0x86000, while the staged source starts at (0xEC000-size)&~0xFFF >= 0x8C000 -- disjoint by >=24 KiB.
 #define FWUP_MAX_IMG 0x60000UL
-#endif
-
-// The WebUSB firmware-update path (staged UF2 write over the vendor channel) is DISABLED on
-// OPK_TARGET_NORDIC_DONGLE builds. The Nordic Open Bootloader records the running app's CRC in ITS OWN
-// settings page at 0xFF000 (which we intentionally don't touch); rewriting the app via WebUSB would leave
-// that CRC out of sync with flash and the bootloader would refuse to boot the new image until the next full
-// nrfutil DFU cycle. There is also no UF2 flow on this dongle. All fwup* entry points get error/no-op stubs
-// in the #else branch at the bottom of the file so vendor control requests fail immediately at the device
-// (belt-and-braces: the WebUSB panel is served from GitHub Pages and can't know it's talking to a dongle
-// build, so refusing at the device is the only reliable gate), and so stray magic bytes at FWUP_META can
-// never spoof an armed-update state at boot.
-#ifndef OPK_TARGET_NORDIC_DONGLE
 
 // Capability tag, searched for BY THE PANEL inside any .uf2 it is about to flash: an image without this
 // exact string predates panel updates, so flashing it silently locks future updates back to UF2-DFU
@@ -493,36 +462,3 @@ void fwupWipeIfArmed(void)
 	for (;;) {
 	} // unreachable (ramWipe resets)
 }
-
-#else // OPK_TARGET_NORDIC_DONGLE: WebUSB firmware-update stubs -- see the comment before #ifndef above.
-
-uint8_t fwupBegin(uint32_t, uint32_t)
-{
-	return FWUP_ERR_STATE;
-}
-uint8_t fwupChunk(uint32_t, const uint8_t *, uint8_t)
-{
-	return FWUP_ERR_STATE;
-}
-uint8_t fwupEnd(void)
-{
-	return FWUP_ERR_STATE;
-}
-void fwupAbort(void)
-{
-}
-uint32_t fwupNextOff(void)
-{
-	return 0;
-}
-void fwupArmFullWipe(void)
-{
-}
-void fwupApplyIfArmed(void)
-{
-}
-void fwupWipeIfArmed(void)
-{
-}
-
-#endif // OPK_TARGET_NORDIC_DONGLE
