@@ -1,0 +1,269 @@
+name: Build Device Firmware
+
+# Builds BOTH device targets -- the Raytac MDBT50Q-CX (branch `mdbt50q-cx`) and the Makerdiary nRF52840
+# Connect Kit (branch `makerdiary-connectkit`) -- and publishes ONE combined release, no matter which
+# branch's push triggered this run. Both are rebuilt from their own branch's latest commit every time.
+#
+# Why: each device used to publish its own release. GitHub only shows one repo-wide "Latest release", so
+# whichever device happened to build most recently silently hid the other's current build behind it. A
+# single always-current release (tag `device-builds`, updated in place) removes that ambiguity.
+#
+# IMPORTANT: this file must be kept byte-identical on both the mdbt50q-cx and makerdiary-connectkit
+# branches. GitHub only evaluates a workflow using the copy of the file that exists ON the branch that was
+# pushed -- a push to branch X can only trigger the workflow file as it exists on branch X, so both
+# branches need their own copy for either push to fire this.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mdbt50q-cx
+      - makerdiary-connectkit
+    paths:
+      - 'OpenPuck/**'
+      - 'variants/makerdiary_nrf52840_connectkit/**'
+      - 'tools/check-hex-range.py'
+      - 'tools/patch_bsp_lfs.py'
+      - 'tools/extract_s140.py'
+      - 'Makefile'
+      - 'gen_version.sh'
+      - 'gen_uf2.sh'
+      - '.github/workflows/build-devices.yml'
+
+concurrency:
+  # One fixed group (not per-ref): a push to either branch queues into the same release process, so two
+  # near-simultaneous pushes (one per branch) collapse into a single up-to-date run instead of racing.
+  group: build-devices
+  cancel-in-progress: true
+
+permissions:
+  # `write` so the final steps can create/update the release and move the per-device changelog markers.
+  contents: write
+
+env:
+  RELEASE_TAG: device-builds
+  MDBT_MARKER_TAG: build-marker/mdbt50q-cx
+  CK_MARKER_TAG: build-marker/makerdiary-connectkit
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out mdbt50q-cx branch
+        uses: actions/checkout@v4
+        with:
+          ref: mdbt50q-cx
+          fetch-depth: 0
+          path: mdbt50q-cx
+
+      - name: Check out makerdiary-connectkit branch
+        uses: actions/checkout@v4
+        with:
+          ref: makerdiary-connectkit
+          fetch-depth: 0
+          path: connectkit
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install adafruit-nrfutil
+        # The Adafruit nRF52 build recipe shells out to adafruit-nrfutil to package a DFU .zip alongside
+        # the .hex; it is not bundled with the core on the runner.
+        run: pip install adafruit-nrfutil
+
+      - name: Install Adafruit nRF52 core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config set board_manager.additional_urls https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
+          arduino-cli core update-index
+          arduino-cli core install adafruit:nrf52
+
+      - name: Install Nordic nrfutil (Rust) + nrf5sdk-tools
+        # Only the mdbt50q-cx build needs this, but it's cheap and keeps this job to one shared toolchain
+        # setup instead of two.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/nrfutil" \
+            https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
+          chmod +x "$HOME/.local/bin/nrfutil"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/nrfutil" install nrf5sdk-tools
+
+      - name: Resolve per-device versions
+        id: versions
+        run: |
+          set -eu
+          SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          for pair in "mdbt50q-cx:mdbt" "connectkit:ck"; do
+            DIR="${pair%%:*}"
+            PFX="${pair##*:}"
+            BASE_VERSION="$(git -C "$DIR" tag --list | grep -E "$SEMVER_RE" | sort -V | tail -n1 || true)"
+            [ -n "$BASE_VERSION" ] || BASE_VERSION="0.9.1"
+            SHA="$(git -C "$DIR" rev-parse --short=8 HEAD)"
+            echo "${PFX}_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+            echo "${PFX}_sha=$SHA" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Generate version headers
+        run: |
+          ( cd mdbt50q-cx && OPK_BUILD_VERSION="${{ steps.versions.outputs.mdbt_version }}" ./gen_version.sh )
+          ( cd connectkit && OPK_BUILD_VERSION="${{ steps.versions.outputs.ck_version }}" ./gen_version.sh )
+
+      - name: Build MDBT50Q-CX DFU packages
+        run: |
+          cd mdbt50q-cx
+          mkdir -p build/mdbt50q-cx build/cache/mdbt50q-cx
+          make build-mdbt50q-cx BUILD_PATH=build/cache/mdbt50q-cx OUTPUT_DIR=build/mdbt50q-cx
+
+      - name: Build Makerdiary Connect Kit UF2
+        run: |
+          cd connectkit
+          make build-makerdiary-connectkit
+
+      - name: Compute per-device changelogs
+        id: changelog
+        run: |
+          set -eu
+          git -C mdbt50q-cx fetch origin "refs/tags/${MDBT_MARKER_TAG}:refs/tags/${MDBT_MARKER_TAG}" 2>/dev/null || true
+          git -C connectkit fetch origin "refs/tags/${CK_MARKER_TAG}:refs/tags/${CK_MARKER_TAG}" 2>/dev/null || true
+
+          {
+            echo "mdbt_changes<<CHANGELOG_EOF"
+            if git -C mdbt50q-cx rev-parse -q --verify "refs/tags/${MDBT_MARKER_TAG}" >/dev/null; then
+              LOG="$(git -C mdbt50q-cx log "refs/tags/${MDBT_MARKER_TAG}..HEAD" --pretty='format:- %s (%h)')"
+              [ -n "$LOG" ] && echo "$LOG" || echo "- No source changes since the last build."
+            else
+              echo "- Initial tracked build."
+            fi
+            echo "CHANGELOG_EOF"
+
+            echo "ck_changes<<CHANGELOG_EOF"
+            if git -C connectkit rev-parse -q --verify "refs/tags/${CK_MARKER_TAG}" >/dev/null; then
+              LOG="$(git -C connectkit log "refs/tags/${CK_MARKER_TAG}..HEAD" --pretty='format:- %s (%h)')"
+              [ -n "$LOG" ] && echo "$LOG" || echo "- No source changes since the last build."
+            else
+              echo "- Initial tracked build."
+            fi
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Stage release assets
+        run: |
+          set -eu
+          mkdir -p release_assets
+          cp mdbt50q-cx/build/mdbt50q-cx/openpuck-mdbt50q-cx.zip release_assets/
+          cp mdbt50q-cx/build/mdbt50q-cx/openpuck-mdbt50q-cx-app.zip release_assets/
+          cp mdbt50q-cx/build/mdbt50q-cx/OpenPuck.ino.hex release_assets/openpuck-mdbt50q-cx.hex
+          cp connectkit/build/connectkit/OpenPuck-makerdiary-connectkit.uf2 release_assets/
+          cp connectkit/build/connectkit/OpenPuck.ino.hex release_assets/openpuck-makerdiary-connectkit.hex
+          ls -la release_assets
+
+      - name: Write release notes
+        env:
+          MDBT_VERSION: ${{ steps.versions.outputs.mdbt_version }}
+          MDBT_SHA: ${{ steps.versions.outputs.mdbt_sha }}
+          MDBT_CHANGES: ${{ steps.changelog.outputs.mdbt_changes }}
+          CK_VERSION: ${{ steps.versions.outputs.ck_version }}
+          CK_SHA: ${{ steps.versions.outputs.ck_sha }}
+          CK_CHANGES: ${{ steps.changelog.outputs.ck_changes }}
+        run: |
+          cat > release_notes.md <<NOTES_EOF
+          Built fresh from each device's branch on every push to either one. One release, both devices,
+          always current.
+
+          ## Raytac MDBT50Q-CX -- \`mdbt50q-cx\` @ \`${MDBT_SHA}\` (${MDBT_VERSION})
+
+          **Changes since the last build:**
+          ${MDBT_CHANGES}
+
+          Two DFU packages -- pick based on where you're starting from:
+
+          - \`openpuck-mdbt50q-cx.zip\` (~330 KB) -- first flash on a stock dongle, or full recovery.
+            Contains SoftDevice + app.
+          - \`openpuck-mdbt50q-cx-app.zip\` (~190 KB) -- every update after the first flash. Skips
+            rewriting the SoftDevice: smaller and faster over USB CDC.
+
+          The Nordic bootloader enforces which one you need on its own: the app-only package declares
+          \`sd_req=0xB6\` (requires S140 6.1.1 already present), so trying it on a dongle that hasn't been
+          through the full package yet is cleanly rejected -- nothing gets written.
+
+          The WebUSB firmware-update tab is disabled at the device on this build. Use
+          [the WebUSB panel](https://safijari.github.io/openpuck/) for pairing/configuration only, and
+          flash updates with the zips below.
+
+          **First time on a fresh dongle:**
+
+          \`\`\`
+          nrfutil nrf5sdk-tools dfu usb-serial -pkg openpuck-mdbt50q-cx.zip \\
+            -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00
+          \`\`\`
+
+          **Subsequent updates (faster, SoftDevice already installed):**
+
+          \`\`\`
+          nrfutil nrf5sdk-tools dfu usb-serial -pkg openpuck-mdbt50q-cx-app.zip \\
+            -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00
+          \`\`\`
+
+          Enter DFU by pressing-and-holding RESET while plugging in (or pressing once if already plugged
+          in and the LED is doing a slow ~1 Hz breathe).
+
+          Tested on Raytac MDBT50Q-CX; should also work on any dongle that enumerates as
+          \`1915:521f Open DFU Bootloader\` on RESET (Nordic PCA10059, other MDBT50Q variants shipping the
+          same Nordic Open Bootloader, third-party clones built from \`pca10059_usb_debug\`).
+
+          ---
+
+          ## Makerdiary nRF52840 Connect Kit -- \`makerdiary-connectkit\` @ \`${CK_SHA}\` (${CK_VERSION})
+
+          **Changes since the last build:**
+          ${CK_CHANGES}
+
+          This build links the app at \`0x23000\` to match the Connect Kit's factory S132 5.1.0
+          bootloader/SoftDevice -- see
+          [docs/MAKERDIARY_CONNECTKIT_SETUP.md](../../blob/makerdiary-connectkit/docs/MAKERDIARY_CONNECTKIT_SETUP.md)
+          for why. The bootloader and SoftDevice are never modified; only the UF2 below is ever written.
+
+          The WebUSB firmware-update tab is disabled at the device on this build too. Use
+          [the WebUSB panel](https://safijari.github.io/openpuck/) for pairing/configuration only, and
+          flash updates with the UF2 below.
+
+          **Flashing (same steps for first-time install and every update):**
+
+          1. Download \`OpenPuck-makerdiary-connectkit.uf2\` below.
+          2. Double-tap RESET (or unplug, hold RESET, plug back in) until the \`UF2BOOT\` drive mounts.
+          3. Drag the \`.uf2\` onto \`UF2BOOT\`.
+          4. Wait for the programming blink to finish, then unplug and reconnect.
+
+          Tested on a Makerdiary nRF52840 Connect Kit (U.FL / external-antenna variant).
+
+          ---
+
+          Same caveats as always -- see the "On LLM Use" section in the README. This is a hobbyist side
+          path.
+          NOTES_EOF
+
+      - name: Create/update combined release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: OpenPuck Device Builds
+          body_path: release_notes.md
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: release_assets/*
+
+      - name: Move per-device changelog markers
+        run: |
+          set -eu
+          git -C mdbt50q-cx tag -f "${MDBT_MARKER_TAG}" HEAD
+          git -C mdbt50q-cx push origin "refs/tags/${MDBT_MARKER_TAG}" --force
+          git -C connectkit tag -f "${CK_MARKER_TAG}" HEAD
+          git -C connectkit push origin "refs/tags/${CK_MARKER_TAG}" --force
