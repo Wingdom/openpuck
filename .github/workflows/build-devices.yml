@@ -115,11 +115,16 @@ jobs:
           ( cd mdbt50q-cx && OPK_BUILD_VERSION="${{ steps.versions.outputs.mdbt_version }}" ./gen_version.sh )
           ( cd connectkit && OPK_BUILD_VERSION="${{ steps.versions.outputs.ck_version }}" ./gen_version.sh )
 
-      - name: Build MDBT50Q-CX DFU packages
+      - name: Build MDBT50Q-CX DFU package
+        # Upstream's official Raytac target (adafruit:nrf52:mdbt50qrx + OPK_BOARD_MDBT50Q_CX_40) --
+        # produces one unsigned Secure DFU package for the factory Open DFU bootloader. It does not
+        # replace or provision the SoftDevice; see docs/BUILD_AND_DEPLOY.md §4a for the one-time S140
+        # provisioning step, which stays a manual, local action (it needs the full Nordic nRF5 SDK) and
+        # isn't something this workflow can produce as an artifact.
         run: |
           cd mdbt50q-cx
-          mkdir -p build/mdbt50q-cx build/cache/mdbt50q-cx
-          make build-mdbt50q-cx BUILD_PATH=build/cache/mdbt50q-cx OUTPUT_DIR=build/mdbt50q-cx
+          make build-raytac
+          make package-raytac
 
       - name: Build Makerdiary Connect Kit UF2
         run: |
@@ -157,9 +162,8 @@ jobs:
         run: |
           set -eu
           mkdir -p release_assets
-          cp mdbt50q-cx/build/mdbt50q-cx/openpuck-mdbt50q-cx.zip release_assets/
-          cp mdbt50q-cx/build/mdbt50q-cx/openpuck-mdbt50q-cx-app.zip release_assets/
-          cp mdbt50q-cx/build/mdbt50q-cx/OpenPuck.ino.hex release_assets/openpuck-mdbt50q-cx.hex
+          cp mdbt50q-cx/build/raytac/OpenPuck-mdbt50q-cx-40.zip release_assets/
+          cp mdbt50q-cx/build/raytac/OpenPuck.ino.hex release_assets/openpuck-mdbt50q-cx-40.hex
           cp connectkit/build/connectkit/OpenPuck-makerdiary-connectkit.uf2 release_assets/
           cp connectkit/build/connectkit/OpenPuck.ino.hex release_assets/openpuck-makerdiary-connectkit.hex
           ls -la release_assets
@@ -177,46 +181,37 @@ jobs:
           Built fresh from each device's branch on every push to either one. One release, both devices,
           always current.
 
-          ## Raytac MDBT50Q-CX -- \`mdbt50q-cx\` @ \`${MDBT_SHA}\` (${MDBT_VERSION})
+          ## Raytac MDBT50Q-CX-40 -- \`mdbt50q-cx\` @ \`${MDBT_SHA}\` (${MDBT_VERSION})
 
           **Changes since the last build:**
           ${MDBT_CHANGES}
 
-          Two DFU packages -- pick based on where you're starting from:
+          This build uses OpenPuck's official Raytac support (Adafruit's \`mdbt50qrx\` profile,
+          \`OPK_BOARD_MDBT50Q_CX_40\`) -- the factory Nordic Open DFU bootloader and its SoftDevice are
+          never replaced by this workflow.
 
-          - \`openpuck-mdbt50q-cx.zip\` (~330 KB) -- first flash on a stock dongle, or full recovery.
-            Contains SoftDevice + app.
-          - \`openpuck-mdbt50q-cx-app.zip\` (~190 KB) -- every update after the first flash. Skips
-            rewriting the SoftDevice: smaller and faster over USB CDC.
+          **First time on a fresh dongle:** it needs a one-time S140 6.1.1 SoftDevice provisioning step
+          before the app package below will install. That step needs the full Nordic nRF5 SDK downloaded
+          locally, so it isn't something this release can hand you as a file -- follow
+          [docs/BUILD_AND_DEPLOY.md §4a](../../blob/main/docs/BUILD_AND_DEPLOY.md#4a-raytac-mdbt50q-cx-40)
+          once, then come back here for the app package below. Every release after that first one only
+          needs the app package.
 
-          The Nordic bootloader enforces which one you need on its own: the app-only package declares
-          \`sd_req=0xB6\` (requires S140 6.1.1 already present), so trying it on a dongle that hasn't been
-          through the full package yet is cleanly rejected -- nothing gets written.
-
-          The WebUSB firmware-update tab is disabled at the device on this build. Use
+          The WebUSB firmware-update tab, its serial/UF2 DFU buttons, and the debug full-board wipe all
+          target the Adafruit bootloader and are rejected on this build; use
           [the WebUSB panel](https://safijari.github.io/openpuck/) for pairing/configuration only, and
-          flash updates with the zips below.
+          flash \`OpenPuck-mdbt50q-cx-40.zip\` below with nRF Util.
 
-          **First time on a fresh dongle:**
-
-          \`\`\`
-          nrfutil nrf5sdk-tools dfu usb-serial -pkg openpuck-mdbt50q-cx.zip \\
-            -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00
-          \`\`\`
-
-          **Subsequent updates (faster, SoftDevice already installed):**
+          **Flashing (same command for first app install and every update, once S140 is provisioned):**
 
           \`\`\`
-          nrfutil nrf5sdk-tools dfu usb-serial -pkg openpuck-mdbt50q-cx-app.zip \\
-            -p /dev/serial/by-id/usb-Nordic_Semiconductor_Open_DFU_Bootloader_*-if00
+          nrfutil device program --firmware OpenPuck-mdbt50q-cx-40.zip --traits nordicDfu
           \`\`\`
 
-          Enter DFU by pressing-and-holding RESET while plugging in (or pressing once if already plugged
-          in and the LED is doing a slow ~1 Hz breathe).
+          Enter DFU by pressing-and-holding the dongle's button while plugging it in (release when the
+          LED fades).
 
-          Tested on Raytac MDBT50Q-CX; should also work on any dongle that enumerates as
-          \`1915:521f Open DFU Bootloader\` on RESET (Nordic PCA10059, other MDBT50Q variants shipping the
-          same Nordic Open Bootloader, third-party clones built from \`pca10059_usb_debug\`).
+          Tested on Raytac MDBT50Q-CX-40 (1 MB flash / 256 KB RAM -- not the CX-33).
 
           ---
 
