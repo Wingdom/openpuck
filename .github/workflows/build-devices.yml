@@ -1,12 +1,15 @@
 name: Build Device Firmware
 
 # Builds BOTH device targets -- the Raytac MDBT50Q-CX (branch `mdbt50q-cx`) and the Makerdiary nRF52840
-# Connect Kit (branch `makerdiary-connectkit`) -- and publishes ONE combined release, no matter which
-# branch's push triggered this run. Both are rebuilt from their own branch's latest commit every time.
+# Connect Kit (branch `makerdiary-connectkit`) -- and publishes a combined release for both, no matter
+# which branch's push triggered this run. Both are rebuilt from their own branch's latest commit every
+# time.
 #
 # Why: each device used to publish its own release. GitHub only shows one repo-wide "Latest release", so
-# whichever device happened to build most recently silently hid the other's current build behind it. A
-# single always-current release (tag `device-builds`, updated in place) removes that ambiguity.
+# whichever device happened to build most recently silently hid the other's current build behind it.
+# Publishing one release that always has both devices' current artifacts removes that ambiguity, while
+# each run still gets its own uniquely-tagged release (see release_tag below) -- nothing is deleted or
+# reused, so release history stays intact; `make_latest: true` just rebadges which one is "Latest".
 #
 # IMPORTANT: this file must be kept byte-identical on both the mdbt50q-cx and makerdiary-connectkit
 # branches. GitHub only evaluates a workflow using the copy of the file that exists ON the branch that was
@@ -41,7 +44,6 @@ permissions:
   contents: write
 
 env:
-  RELEASE_TAG: device-builds
   MDBT_MARKER_TAG: build-marker/mdbt50q-cx
   CK_MARKER_TAG: build-marker/makerdiary-connectkit
 
@@ -109,6 +111,14 @@ jobs:
             echo "${PFX}_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
             echo "${PFX}_sha=$SHA" >> "$GITHUB_OUTPUT"
           done
+
+          MDBT_SHA="$(git -C mdbt50q-cx rev-parse --short=8 HEAD)"
+          CK_SHA="$(git -C connectkit rev-parse --short=8 HEAD)"
+          # Unique per run (not a fixed rolling tag): the run number makes it distinguishable even on
+          # a re-run with no new commits on either side. Every run gets its OWN release, kept in
+          # history; `make_latest: true` below only changes which one is badged "Latest" on GitHub --
+          # it doesn't touch or delete the others.
+          echo "release_tag=device-builds-${MDBT_SHA}-${CK_SHA}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate version headers
         run: |
@@ -244,22 +254,18 @@ jobs:
           path.
           NOTES_EOF
 
-      - name: Delete previous release
-        # softprops/action-gh-release only uploads/overwrites files matching the CURRENT run's
-        # filenames -- it never removes assets that existed on a prior run but aren't produced
-        # anymore (e.g. after a rename). Recreating the release from scratch each run is what
-        # guarantees it only ever holds this run's files, and also keeps the release's displayed
-        # target commit current instead of frozen at whichever run first created the tag.
-        # `|| true`: nothing to delete on the very first run.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release delete "${RELEASE_TAG}" --yes --cleanup-tag --repo "${{ github.repository }}" || true
-
-      - name: Create/update combined release
+      - name: Create combined release
+        # Every run publishes its OWN release under a unique tag (see the release_tag output above),
+        # so nothing is ever deleted or reused across runs -- old releases stay in the repo's release
+        # history exactly as published. `make_latest: true` only rebadges which ONE release GitHub
+        # shows as "Latest"; it does not touch or remove any other release.
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: OpenPuck Device Builds
+          tag_name: ${{ steps.versions.outputs.release_tag }}
+          name: >-
+            OpenPuck Device Builds --
+            mdbt50q-cx@${{ steps.versions.outputs.mdbt_sha }} /
+            connectkit@${{ steps.versions.outputs.ck_sha }}
           body_path: release_notes.md
           prerelease: false
           make_latest: true
