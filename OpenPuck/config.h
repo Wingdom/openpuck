@@ -21,6 +21,15 @@
 #define OPK_FACTORY_RESET 0
 #endif
 
+// Optional GPIO trigger wired to the HOST motherboard's front-panel power-switch header: fires a
+// momentary pulse when the paired Steam Controller's STEAM button is short-pressed WHILE the host
+// is off (USB not enumerated). 0 (default) = feature compiled out entirely -- no pin driven, no
+// behavior change for anyone without the extra wiring. -DOPK_PWR_SWITCH=1 to enable. See
+// pwr_switch.h for the pin/timing knobs.
+#ifndef OPK_PWR_SWITCH
+#define OPK_PWR_SWITCH 0
+#endif
+
 // ---- USB presentation modes (g_usbMode). RF poll/relay is identical across all; only USB enumeration +
 //      report mapping differ. ----
 #define MODE_STEAM 0 // Valve puck; auto-lizard when Steam closed
@@ -41,7 +50,15 @@
 // console wants a bare Sixaxis HID, not a composite). Answers the PS3's GET_REPORT(0xF2/0xF5/0xEF/0x01)
 // enable handshake. + gyro/accel + rumble.
 #define MODE_PS3 9
-#define MODE_MAX 9
+// Microsoft Original Xbox Controller S (045E:0289)
+#define MODE_XBOX_OG 10
+// Generic DirectInput joystick -- presents EVERY analog input at once (sticks, triggers, both trackpads, gyro)
+// as two DirectInput devices, for flight/space sims that bind axes through DirectInput rather than XInput.
+#define MODE_DINPUT 11
+// SInput: the open SDL-native gamepad protocol (docs.handheldlegend.com/s/sinput). Sticks + analog triggers +
+// gyro/accel + BOTH trackpads + battery, all bound natively by SDL3 / Steam Input with no impersonation.
+#define MODE_SINPUT 12
+#define MODE_MAX 12
 
 // The two "game" personalities drop the wake-mouse + WebUSB interfaces so the device is a genuine single-HID PS
 // controller (some PC games -- e.g. Fortnite/UE GameInput -- refuse PS classification when extra interfaces are
@@ -74,6 +91,8 @@ static inline uint8_t etypeForMode(uint8_t m)
 {
 	switch (m) {
 	case MODE_XBOX:
+	// OG Xbox Controller S shares the Xbox layout / button config minus guide button
+	case MODE_XBOX_OG:
 		return ET_XBOX;
 	case MODE_SW_HORI:
 	case MODE_SW_PRO:
@@ -86,7 +105,10 @@ static inline uint8_t etypeForMode(uint8_t m)
 	case MODE_PS5_GAME:
 		return ET_DS5;
 	default:
-		return ET_NONE; // Steam / Lizard
+		// Steam / Lizard forward raw input for the host to remap. DirectInput and SInput expose every
+		// physical button as its own bindable button (paddles included), so they have nothing to remap
+		// either -- binding happens in the sim / in SDL.
+		return ET_NONE;
 	}
 }
 
@@ -139,6 +161,16 @@ struct TypeCfg {
 	uint8_t rumble;
 };
 extern TypeCfg g_type[ET_COUNT];
+
+// Trackpad -> analog stick mapping, per emulated type: {left pad, right pad}, values PS_OFF/PS_LEFT/PS_RIGHT.
+// While the mapped pad is touched its coordinates drive that stick; releasing it re-centers the stick (the
+// physical stick still drives it whenever the pad is untouched). Kept OUTSIDE TypeCfg so the on-flash Cfg
+// layout only grows in its tail -- an existing cfg.bin still loads and keeps every other setting.
+#define PS_OFF 0
+#define PS_LEFT 1
+#define PS_RIGHT 2
+#define PS_MAX 2
+extern uint8_t g_padStickCfg[ET_COUNT][2];
 extern uint8_t
 	g_etype; // etypeForMode(g_usbMode), resolved at boot (ET_NONE for puck modes)
 
@@ -153,6 +185,8 @@ extern uint8_t
 extern uint8_t g_rumble;
 // LED brightness for the active emulated type (0 = no override, 1-100 = brightness %)
 extern uint8_t g_ledBright;
+// Live mirror of g_padStickCfg[g_etype]: {left pad, right pad} -> stick (PS_*).
+extern uint8_t g_padStick[2];
 
 // Copy g_type[g_etype] into the live mirrors above (safe defaults when g_etype == ET_NONE).
 void applyActiveType();
