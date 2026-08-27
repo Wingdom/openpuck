@@ -58,7 +58,7 @@ uint16_t g_connPoll = 0; // poll counter (re-assert awake every 32nd)
 uint32_t g_connF1 = 0;
 uint8_t g_connF3v = 0xFF;
 
-uint8_t g_qos = 0;
+uint8_t g_qos = 1;
 // clean, spread channels (from the puck's RSSI/PER scan)
 static const uint8_t g_hopCand[] = { 18, 46, 76, 22, 68 };
 uint8_t g_hopIdx = 0;
